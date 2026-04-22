@@ -271,7 +271,7 @@ tbody td{padding:10px 14px;font-size:13px;vertical-align:middle;}
       </div>
       <div class="field"><label>顏色標籤</label><input type="color" id="pm-color" value="#2563eb" style="height:38px;cursor:pointer;"></div>
     </div>
-    <div class="m-footer"><button class="btn btn-ghost" onclick="closeProjModal()">取消</button><button class="btn btn-blue" onclick="saveProject()">儲存</button></div>
+    <div class="m-footer"><button class="btn btn-ghost" onclick="closeProjModal()">取消</button><button class="btn btn-blue" onclick="saveProject_form()">儲存</button></div>
   </div>
 </div>
 
@@ -329,7 +329,7 @@ tbody td{padding:10px 14px;font-size:13px;vertical-align:middle;}
 <!-- Firebase SDKs -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot, updateDoc }
+import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -343,8 +343,19 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db  = getFirestore(app);
 
+// ── 儲存整個 project 到 Firebase（最穩定方式）──────────────────────────
+async function saveProject(projId) {
+  try {
+    await setDoc(doc(db,'projects',projId), projects[projId]);
+    showToast('✅ 已儲存');
+  } catch(e) {
+    showToast('❌ 儲存失敗：' + e.message);
+    console.error('Firebase error:', e);
+  }
+}
+
 // ── STATE ─────────────────────────────────────────────────────────────
-let projects   = {};   // { projId: { name, desc, deadline, color, vendors:[], tasks:{} } }
+let projects = {};
 let currentProjId = null;
 let editingTaskId = null;
 let editingProjId = null;
@@ -356,34 +367,28 @@ let CAT_COLORS = {
   '水電工程':'#2563eb','冷凍藏庫':'#0891b2','設備':'#7c3aed','隔間':'#e05656',
   '室內空調':'#0284c7','工廠申請登記':'#16a34a','人員訓練 軟體建置':'#c026d3','其他':'#64748b',
 };
-let _pIdx=0;
+let _pIdx = 0;
 function randColor(){ return PALETTE[(_pIdx++)%PALETTE.length]; }
 function catColor(c){ return CAT_COLORS[c]||'#64748b'; }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
-// ── FIREBASE HELPERS ──────────────────────────────────────────────────
+// ── FIREBASE LOAD ─────────────────────────────────────────────────────
 async function loadProjects() {
   const snap = await getDocs(collection(db,'projects'));
   projects = {};
   snap.forEach(d => { projects[d.id] = d.data(); });
-  renderSidebar();
-  document.getElementById('loading').style.display='none';
+  document.getElementById('loading').style.display = 'none';
   setSyncStatus(true);
-}
-
-async function saveProjectToDb(projId, data) {
-  await setDoc(doc(db,'projects',projId), data, {merge:true});
-}
-async function deleteProjectFromDb(projId) {
-  await deleteDoc(doc(db,'projects',projId));
+  renderSidebar();
 }
 
 function listenProject(projId) {
   unsubscribes.forEach(u=>u());
-  unsubscribes=[];
+  unsubscribes = [];
   const unsub = onSnapshot(doc(db,'projects',projId), snap => {
     if (snap.exists()) {
       projects[projId] = snap.data();
-      if (currentProjId===projId) renderProjectContent();
+      if (currentProjId === projId) renderProjectContent();
     }
   });
   unsubscribes.push(unsub);
@@ -391,30 +396,33 @@ function listenProject(projId) {
 
 // ── UI HELPERS ────────────────────────────────────────────────────────
 function setSyncStatus(ok) {
-  const el = document.getElementById('syncStatus');
-  el.innerHTML = ok
-    ? `<span class="sync-dot"></span>即時同步`
-    : `<span class="sync-dot sync-off"></span>連線中`;
+  document.getElementById('syncStatus').innerHTML = ok
+    ? '<span class="sync-dot"></span>即時同步'
+    : '<span class="sync-dot sync-off"></span>連線中';
 }
 function showToast(msg) {
-  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),2500);
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
 }
-function bdg(s){
+function bdg(s) {
   if(s==='已完成') return `<span class="badge b-done"><span class="bd"></span>${s}</span>`;
   if(s==='進行中') return `<span class="badge b-doing"><span class="bd"></span>${s}</span>`;
   return `<span class="badge b-pend"><span class="bd"></span>${s}</span>`;
 }
 function pColor(p){ return p>=100?'var(--green)':p>=50?'var(--blue)':p>0?'var(--yellow)':'#e2e8f0'; }
-function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
 // ── SIDEBAR ───────────────────────────────────────────────────────────
 function renderSidebar() {
   const list = document.getElementById('projList');
   const ids  = Object.keys(projects);
-  if (!ids.length) { list.innerHTML='<div style="font-size:12px;color:var(--text3);padding:8px">尚無專案</div>'; return; }
+  if (!ids.length) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px">尚無專案</div>';
+    return;
+  }
   list.innerHTML = ids.map(id => {
-    const p = projects[id];
+    const p   = projects[id];
     const cnt = p.tasks ? Object.keys(p.tasks).length : 0;
     return `<div class="proj-item${currentProjId===id?' active':''}" onclick="selectProject('${id}')">
       <div class="proj-dot" style="background:${p.color||'#2563eb'}"></div>
@@ -430,17 +438,17 @@ function selectProject(id) {
   renderSidebar();
   renderProjectContent();
 }
+window.selectProject = selectProject;
 
 // ── PROJECT CONTENT ───────────────────────────────────────────────────
 function renderProjectContent() {
   const p = projects[currentProjId];
   if (!p) return;
-  document.getElementById('emptyState').style.display='none';
-  const pc = document.getElementById('projContent');
-  pc.style.display='flex';
-  document.getElementById('projTitle').textContent = p.name;
-  document.getElementById('projDesc').textContent  = p.desc||'';
-  document.getElementById('projDeadline').textContent = p.deadline ? `⚑ 期限 ${p.deadline}` : '⚑ 無期限';
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('projContent').style.display = 'flex';
+  document.getElementById('projTitle').textContent    = p.name;
+  document.getElementById('projDesc').textContent     = p.desc || '';
+  document.getElementById('projDeadline').textContent = p.deadline ? `⚑ 期限 ${p.deadline}` : '';
 
   const tasks = p.tasks ? Object.values(p.tasks) : [];
   document.getElementById('s-total').textContent = tasks.length;
@@ -454,17 +462,17 @@ function renderProjectContent() {
 
 // ── VENDOR LINKS ──────────────────────────────────────────────────────
 function renderVendorLinks() {
-  const p = projects[currentProjId];
-  const vendors = p.vendors||[];
-  const base = window.location.href.replace('admin.html','');
+  const p       = projects[currentProjId];
+  const vendors = p.vendors || [];
+  const base    = window.location.href.replace('admin.html','');
   const container = document.getElementById('vendorLinks');
   if (!vendors.length) {
-    container.innerHTML='<div style="color:var(--text3);font-size:13px">尚未新增廠商，點右上角「管理廠商」新增</div>';
+    container.innerHTML = '<div style="color:var(--text3);font-size:13px">尚未新增廠商，點右上角「管理廠商」新增</div>';
     return;
   }
-  container.innerHTML = vendors.map((v,i) => {
-    const url = `${base}vendor.html?project=${encodeURIComponent(currentProjId)}&vendor=${encodeURIComponent(v)}`;
-    const color = PALETTE[i%PALETTE.length];
+  container.innerHTML = vendors.map((v, i) => {
+    const url   = `${base}vendor.html?project=${encodeURIComponent(currentProjId)}&vendor=${encodeURIComponent(v)}`;
+    const color = PALETTE[i % PALETTE.length];
     return `<div class="vendor-card">
       <div class="vendor-avatar" style="background:${color}">${v.charAt(0)}</div>
       <div class="vendor-info">
@@ -479,30 +487,34 @@ function renderVendorLinks() {
 }
 
 function copyLink(url, btnId) {
-  navigator.clipboard.writeText(url).then(()=>{
-    const btn=document.getElementById(btnId);
-    btn.textContent='✓ 已複製'; btn.classList.add('copied');
-    setTimeout(()=>{ btn.textContent='複製'; btn.classList.remove('copied'); },2000);
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById(btnId);
+    btn.textContent = '✓ 已複製';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '複製'; btn.classList.remove('copied'); }, 2000);
   });
 }
+window.copyLink = copyLink;
 
-// ── TABLE ─────────────────────────────────────────────────────────────
-function setFilter(s){
-  filterStatus=s;
-  document.querySelectorAll('.pill').forEach(b=>b.classList.toggle('active',b.textContent.trim()===s));
+// ── FILTER ────────────────────────────────────────────────────────────
+function setFilter(s) {
+  filterStatus = s;
+  document.querySelectorAll('.pill').forEach(b => b.classList.toggle('active', b.textContent.trim() === s));
   renderTable();
 }
-window.setFilter=setFilter;
+window.setFilter = setFilter;
 
-function renderTable(){
-  const p=projects[currentProjId]; if(!p) return;
-  const q=document.getElementById('searchInput').value.toLowerCase();
-  const tasks=Object.entries(p.tasks||{}).filter(([,t])=>{
-    if(filterStatus!=='全部'&&t.status!==filterStatus) return false;
-    if(q&&![t.name,t.cat,t.worker||''].some(s=>s.toLowerCase().includes(q))) return false;
+// ── TABLE ─────────────────────────────────────────────────────────────
+function renderTable() {
+  const p = projects[currentProjId];
+  if (!p) return;
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const tasks = Object.entries(p.tasks || {}).filter(([, t]) => {
+    if (filterStatus !== '全部' && t.status !== filterStatus) return false;
+    if (q && ![t.name, t.cat, t.worker||''].some(s => s.toLowerCase().includes(q))) return false;
     return true;
   });
-  document.getElementById('tblBody').innerHTML = tasks.map(([tid,t])=>`
+  document.getElementById('tblBody').innerHTML = tasks.map(([tid, t]) => `
     <tr>
       <td><span class="chip" style="background:${catColor(t.cat)}18;color:${catColor(t.cat)};border:1px solid ${catColor(t.cat)}33">${t.cat||'—'}</span></td>
       <td style="font-weight:600;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.name}</td>
@@ -517,303 +529,280 @@ function renderTable(){
       <td><button onclick="openTaskModal('${tid}')" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;color:var(--text2);">編輯</button></td>
     </tr>`).join('');
 }
+window.renderTable = renderTable;
 
 // ── INLINE EDIT ───────────────────────────────────────────────────────
-function inlineEdit(tid,field,el,type){
-  if(el.querySelector('input,select')) return;
-  const p=projects[currentProjId]; if(!p) return;
-  const task=p.tasks[tid]; if(!task) return;
-  const display=el.innerHTML;
+function inlineEdit(tid, field, el, type) {
+  if (el.querySelector('input,select')) return;
+  const p = projects[currentProjId];
+  if (!p || !p.tasks || !p.tasks[tid]) return;
+  const task    = p.tasks[tid];
+  const display = el.innerHTML;
   let inp;
-  if(type==='date'){
-    inp=document.createElement('input'); inp.type='date'; inp.value=task[field]||'';
-    inp.style.cssText='background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:JetBrains Mono,monospace;width:132px;outline:none;';
-  } else if(type==='number'){
-    inp=document.createElement('input'); inp.type='number'; inp.value=task[field]||0;
-    inp.min=field==='pct'?0:1; inp.max=field==='pct'?100:9999;
-    inp.style.cssText='background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:JetBrains Mono,monospace;width:72px;outline:none;';
-  } else if(type==='status'){
-    inp=document.createElement('select');
-    ['未開始','進行中','已完成'].forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;if(s===task[field])o.selected=true;inp.appendChild(o);});
-    inp.style.cssText='background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;outline:none;';
+  if (type === 'date') {
+    inp = document.createElement('input');
+    inp.type = 'date';
+    inp.value = task[field] || '';
+    inp.style.cssText = 'background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:JetBrains Mono,monospace;width:132px;outline:none;';
+  } else if (type === 'number') {
+    inp = document.createElement('input');
+    inp.type = 'number';
+    inp.value = task[field] || 0;
+    inp.min = field === 'pct' ? 0 : 1;
+    inp.max = field === 'pct' ? 100 : 9999;
+    inp.style.cssText = 'background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:JetBrains Mono,monospace;width:72px;outline:none;';
+  } else if (type === 'status') {
+    inp = document.createElement('select');
+    ['未開始','進行中','已完成'].forEach(s => {
+      const o = document.createElement('option');
+      o.value = s; o.textContent = s;
+      if (s === task[field]) o.selected = true;
+      inp.appendChild(o);
+    });
+    inp.style.cssText = 'background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;outline:none;';
   }
-  async function commit(){
-    let v=inp.value;
-    if(type==='number'){v=parseInt(v)||0; if(field==='pct')v=Math.min(100,Math.max(0,v));}
-    if(type==='date') v=v||null;
-    task[field]=v;
-    if(field==='status'&&v==='已完成') task.pct=100;
-    if(field==='pct'&&v===100) task.status='已完成';
-    const proj=projects[currentProjId]; if(!proj) return;
-    if(!proj.tasks[tid]) return;
-    proj.tasks[tid][field]=v;
-    if(field==='status'&&v==='已完成') proj.tasks[tid].pct=100;
-    if(field==='pct'&&v===100) proj.tasks[tid].status='已完成';
-    await setDoc(doc(db,'projects',currentProjId),{tasks: proj.tasks},{merge:true});
-    showToast('✅ 已儲存');
+
+  async function commit() {
+    let v = inp.value;
+    if (type === 'number') { v = parseInt(v)||0; if(field==='pct') v = Math.min(100, Math.max(0, v)); }
+    if (type === 'date') v = v || null;
+    // 更新本地
+    task[field] = v;
+    if (field === 'status' && v === '已完成') task.pct = 100;
+    if (field === 'pct'    && v === 100)      task.status = '已完成';
+    // 儲存到 Firebase
+    await saveProject(currentProjId);
+    renderTable();
   }
-  inp.addEventListener('blur',commit);
-  inp.addEventListener('keydown',e=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape')el.innerHTML=display;});
-  el.innerHTML=''; el.appendChild(inp); inp.focus();
-  if(inp.select&&type!=='date') inp.select();
+
+  inp.addEventListener('blur', commit);
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') inp.blur();
+    if (e.key === 'Escape') { el.innerHTML = display; }
+  });
+  el.innerHTML = '';
+  el.appendChild(inp);
+  inp.focus();
+  if (inp.select && type !== 'date') inp.select();
 }
-window.inlineEdit=inlineEdit;
+window.inlineEdit = inlineEdit;
 
 // ── CATEGORY ─────────────────────────────────────────────────────────
-function syncCatSel(sel,cur){
-  sel.innerHTML=Object.keys(CAT_COLORS).map(c=>`<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
-  sel.innerHTML+=`<option value="__new__" style="color:var(--blue);font-weight:700">＋ 新增類別…</option>`;
+function syncCatSel(sel, cur) {
+  sel.innerHTML = Object.keys(CAT_COLORS)
+    .map(c => `<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
+  sel.innerHTML += `<option value="__new__" style="color:var(--blue);font-weight:700">＋ 新增類別…</option>`;
 }
-function handleCatChange(sel){
-  const row=document.getElementById('newcat-row');
-  if(sel.value==='__new__'){row.classList.add('show');document.getElementById('tm-newcat').value='';document.getElementById('tm-newcat-color').value=randColor();document.getElementById('tm-newcat').focus();}
-  else row.classList.remove('show');
+function handleCatChange(sel) {
+  const row = document.getElementById('newcat-row');
+  if (sel.value === '__new__') {
+    row.classList.add('show');
+    document.getElementById('tm-newcat').value = '';
+    document.getElementById('tm-newcat-color').value = randColor();
+    document.getElementById('tm-newcat').focus();
+  } else {
+    row.classList.remove('show');
+  }
 }
-function confirmNewCat(){
-  const name=document.getElementById('tm-newcat').value.trim();
-  const color=document.getElementById('tm-newcat-color').value;
-  if(!name){alert('請輸入類別名稱');return;}
-  if(!CAT_COLORS[name]) CAT_COLORS[name]=color;
-  syncCatSel(document.getElementById('tm-cat'),name);
+function confirmNewCat() {
+  const name  = document.getElementById('tm-newcat').value.trim();
+  const color = document.getElementById('tm-newcat-color').value;
+  if (!name) { alert('請輸入類別名稱'); return; }
+  if (!CAT_COLORS[name]) CAT_COLORS[name] = color;
+  syncCatSel(document.getElementById('tm-cat'), name);
   document.getElementById('newcat-row').classList.remove('show');
 }
-window.handleCatChange=handleCatChange;
-window.confirmNewCat=confirmNewCat;
+window.handleCatChange = handleCatChange;
+window.confirmNewCat   = confirmNewCat;
 
 // ── PROJECT MODAL ─────────────────────────────────────────────────────
-function openProjModal(){
-  editingProjId=null;
-  document.getElementById('projModalTitle').textContent='新增專案';
-  document.getElementById('pm-name').value='';
-  document.getElementById('pm-desc').value='';
-  document.getElementById('pm-start').value='';
-  document.getElementById('pm-deadline').value='';
-  document.getElementById('pm-color').value='#2563eb';
+function openProjModal() {
+  editingProjId = null;
+  document.getElementById('projModalTitle').textContent = '新增專案';
+  document.getElementById('pm-name').value     = '';
+  document.getElementById('pm-desc').value     = '';
+  document.getElementById('pm-start').value    = '';
+  document.getElementById('pm-deadline').value = '';
+  document.getElementById('pm-color').value    = '#2563eb';
   document.getElementById('projModal').classList.add('open');
 }
-function openProjEditModal(){
-  const p=projects[currentProjId]; if(!p) return;
-  editingProjId=currentProjId;
-  document.getElementById('projModalTitle').textContent='編輯專案';
-  document.getElementById('pm-name').value=p.name||'';
-  document.getElementById('pm-desc').value=p.desc||'';
-  document.getElementById('pm-start').value=p.start||'';
-  document.getElementById('pm-deadline').value=p.deadline||'';
-  document.getElementById('pm-color').value=p.color||'#2563eb';
+function openProjEditModal() {
+  const p = projects[currentProjId]; if (!p) return;
+  editingProjId = currentProjId;
+  document.getElementById('projModalTitle').textContent = '編輯專案';
+  document.getElementById('pm-name').value     = p.name     || '';
+  document.getElementById('pm-desc').value     = p.desc     || '';
+  document.getElementById('pm-start').value    = p.start    || '';
+  document.getElementById('pm-deadline').value = p.deadline || '';
+  document.getElementById('pm-color').value    = p.color    || '#2563eb';
   document.getElementById('projModal').classList.add('open');
 }
-function closeProjModal(){ document.getElementById('projModal').classList.remove('open'); }
-async function saveProject(){
-  const name=document.getElementById('pm-name').value.trim();
-  if(!name){alert('請輸入專案名稱');return;}
-  const id=editingProjId||('proj-'+uid());
-  const existing=projects[id]||{};
-  const data={
-    name, desc:document.getElementById('pm-desc').value,
-    start:document.getElementById('pm-start').value||null,
-    deadline:document.getElementById('pm-deadline').value||null,
-    color:document.getElementById('pm-color').value,
-    vendors: existing.vendors||[],
-    tasks: existing.tasks||{},
+function closeProjModal() { document.getElementById('projModal').classList.remove('open'); }
+async function saveProjData() {
+  const name = document.getElementById('pm-name').value.trim();
+  if (!name) { alert('請輸入專案名稱'); return; }
+  const id       = editingProjId || ('proj-' + uid());
+  const existing = projects[id]  || {};
+  projects[id] = {
+    name,
+    desc:     document.getElementById('pm-desc').value,
+    start:    document.getElementById('pm-start').value    || null,
+    deadline: document.getElementById('pm-deadline').value || null,
+    color:    document.getElementById('pm-color').value,
+    vendors:  existing.vendors || [],
+    tasks:    existing.tasks   || {},
   };
-  await saveProjectToDb(id,data);
-  projects[id]=data;
+  await saveProject(id);
   closeProjModal();
   renderSidebar();
-  if(!editingProjId) selectProject(id);
+  if (!editingProjId) selectProject(id);
   else renderProjectContent();
-  showToast(editingProjId?'專案已更新':'專案已建立');
 }
-async function deleteProject(){
-  if(!currentProjId) return;
-  if(!confirm(`確定要刪除專案「${projects[currentProjId]?.name}」嗎？此操作無法復原。`)) return;
-  await deleteProjectFromDb(currentProjId);
+async function deleteProjData() {
+  if (!currentProjId) return;
+  if (!confirm(`確定要刪除專案「${projects[currentProjId]?.name}」嗎？`)) return;
+  await deleteDoc(doc(db,'projects', currentProjId));
   delete projects[currentProjId];
-  currentProjId=null;
-  document.getElementById('projContent').style.display='none';
-  document.getElementById('emptyState').style.display='flex';
+  currentProjId = null;
+  document.getElementById('projContent').style.display  = 'none';
+  document.getElementById('emptyState').style.display   = 'flex';
   renderSidebar();
   showToast('專案已刪除');
 }
-window.selectProject=selectProject;
-window.openProjModal=openProjModal;
-window.openProjEditModal=openProjEditModal;
-window.closeProjModal=closeProjModal;
-window.saveProject=saveProject;
-window.deleteProject=deleteProject;
+window.openProjModal     = openProjModal;
+window.openProjEditModal = openProjEditModal;
+window.closeProjModal    = closeProjModal;
+window.saveProject_form  = saveProjData;
+window.deleteProject     = deleteProjData;
 
 // ── VENDOR MODAL ──────────────────────────────────────────────────────
-function openVendorModal(){
+function openVendorModal() {
   renderVmList();
   document.getElementById('vendorModal').classList.add('open');
 }
-function closeVendorModal(){ document.getElementById('vendorModal').classList.remove('open'); renderVendorLinks(); }
-function renderVmList(){
-  const vendors=projects[currentProjId]?.vendors||[];
-  document.getElementById('vmList').innerHTML=vendors.length
-    ? vendors.map((v,i)=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:8px;">
-        <div style="flex:1;font-weight:600">${v}</div>
-        <button onclick="removeVendor(${i})" style="background:none;border:1.5px solid var(--red);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;">移除</button>
-      </div>`).join('')
+function closeVendorModal() {
+  document.getElementById('vendorModal').classList.remove('open');
+  renderVendorLinks();
+}
+function renderVmList() {
+  const vendors = projects[currentProjId]?.vendors || [];
+  document.getElementById('vmList').innerHTML = vendors.length
+    ? vendors.map((v, i) => `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:8px;">
+          <div style="flex:1;font-weight:600">${v}</div>
+          <button onclick="removeVendorItem(${i})" style="background:none;border:1.5px solid var(--red);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;">移除</button>
+        </div>`).join('')
     : '<div style="color:var(--text3);font-size:13px;padding:8px">尚未新增廠商</div>';
 }
-async function addVendor(){
-  const name=document.getElementById('vm-name').value.trim();
-  if(!name) return;
-  const p=projects[currentProjId]; if(!p) return;
-  const vendors=[...(p.vendors||[])];
-  if(vendors.includes(name)){showToast('廠商已存在');return;}
-  vendors.push(name);
-  await updateDoc(doc(db,'projects',currentProjId),{vendors});
-  projects[currentProjId].vendors=vendors;
-  document.getElementById('vm-name').value='';
+async function addVendorItem() {
+  const name = document.getElementById('vm-name').value.trim();
+  if (!name) return;
+  const p = projects[currentProjId]; if (!p) return;
+  if (!p.vendors) p.vendors = [];
+  if (p.vendors.includes(name)) { showToast('廠商已存在'); return; }
+  p.vendors.push(name);
+  await saveProject(currentProjId);
+  document.getElementById('vm-name').value = '';
   renderVmList();
-  showToast('廠商已新增');
 }
-async function removeVendor(idx){
-  const p=projects[currentProjId]; if(!p) return;
-  const vendors=[...(p.vendors||[])];
-  if(!confirm(`確定移除廠商「${vendors[idx]}」？`)) return;
-  vendors.splice(idx,1);
-  await updateDoc(doc(db,'projects',currentProjId),{vendors});
-  projects[currentProjId].vendors=vendors;
+async function removeVendorItem(idx) {
+  const p = projects[currentProjId]; if (!p) return;
+  if (!confirm(`確定移除廠商「${p.vendors[idx]}」？`)) return;
+  p.vendors.splice(idx, 1);
+  await saveProject(currentProjId);
   renderVmList();
-  showToast('廠商已移除');
 }
-window.openVendorModal=openVendorModal;
-window.closeVendorModal=closeVendorModal;
-window.addVendor=addVendor;
-window.removeVendor=removeVendor;
+window.openVendorModal  = openVendorModal;
+window.closeVendorModal = closeVendorModal;
+window.addVendor        = addVendorItem;
+window.removeVendorItem = removeVendorItem;
 
 // ── TASK MODAL ────────────────────────────────────────────────────────
-function openTaskModal(tid){
-  editingTaskId=tid||null;
-  const sel=document.getElementById('tm-cat');
-  if(tid){
-    const t=projects[currentProjId]?.tasks?.[tid]; if(!t) return;
-    document.getElementById('tmTitle').textContent='編輯任務';
-    document.getElementById('tm-name').value=t.name||'';
-    syncCatSel(sel,t.cat||'水電工程');
-    document.getElementById('tm-status').value=t.status||'未開始';
-    document.getElementById('tm-start').value=t.start||'';
-    document.getElementById('tm-end').value=t.end||'';
-    document.getElementById('tm-est').value=t.est||'';
-    document.getElementById('tm-pct').value=t.pct||0;
-    document.getElementById('tm-worker').value=t.worker||'';
-    document.getElementById('tmDelBtn').style.display='block';
+function openTaskModal(tid) {
+  editingTaskId = tid || null;
+  const sel = document.getElementById('tm-cat');
+  if (tid) {
+    const t = projects[currentProjId]?.tasks?.[tid]; if (!t) return;
+    document.getElementById('tmTitle').textContent   = '編輯任務';
+    document.getElementById('tm-name').value         = t.name   || '';
+    syncCatSel(sel, t.cat || '水電工程');
+    document.getElementById('tm-status').value       = t.status || '未開始';
+    document.getElementById('tm-start').value        = t.start  || '';
+    document.getElementById('tm-end').value          = t.end    || '';
+    document.getElementById('tm-est').value          = t.est    || '';
+    document.getElementById('tm-pct').value          = t.pct    || 0;
+    document.getElementById('tm-worker').value       = t.worker || '';
+    document.getElementById('tmDelBtn').style.display = 'block';
   } else {
-    document.getElementById('tmTitle').textContent='新增任務';
-    document.getElementById('tm-name').value='';
-    syncCatSel(sel,'水電工程');
-    document.getElementById('tm-status').value='未開始';
-    document.getElementById('tm-start').value='';
-    document.getElementById('tm-end').value='';
-    document.getElementById('tm-est').value='';
-    document.getElementById('tm-pct').value=0;
-    document.getElementById('tm-worker').value='';
-    document.getElementById('tmDelBtn').style.display='none';
+    document.getElementById('tmTitle').textContent    = '新增任務';
+    document.getElementById('tm-name').value          = '';
+    syncCatSel(sel, '水電工程');
+    document.getElementById('tm-status').value        = '未開始';
+    document.getElementById('tm-start').value         = '';
+    document.getElementById('tm-end').value           = '';
+    document.getElementById('tm-est').value           = '';
+    document.getElementById('tm-pct').value           = 0;
+    document.getElementById('tm-worker').value        = '';
+    document.getElementById('tmDelBtn').style.display = 'none';
   }
   document.getElementById('newcat-row').classList.remove('show');
   document.getElementById('taskModal').classList.add('open');
 }
-function closeTaskModal(){ document.getElementById('taskModal').classList.remove('open'); editingTaskId=null; }
-async function saveTask(){
-  if(!currentProjId) return;
-  const name=document.getElementById('tm-name').value.trim();
-  if(!name){alert('請輸入任務名稱');return;}
-  const sv=document.getElementById('tm-cat').value;
-  const cat=sv==='__new__'?(document.getElementById('tm-newcat').value.trim()||'其他'):sv;
-  if(cat&&!CAT_COLORS[cat]) CAT_COLORS[cat]=randColor();
-  const tid=editingTaskId||('task-'+uid());
-  const task={
-    id:tid, cat, name,
-    worker:document.getElementById('tm-worker').value,
-    start:document.getElementById('tm-start').value||null,
-    end:document.getElementById('tm-end').value||null,
-    est:parseInt(document.getElementById('tm-est').value)||0,
-    status:document.getElementById('tm-status').value,
-    pct:Math.min(100,Math.max(0,parseInt(document.getElementById('tm-pct').value)||0)),
+function closeTaskModal() {
+  document.getElementById('taskModal').classList.remove('open');
+  editingTaskId = null;
+}
+async function saveTaskData() {
+  if (!currentProjId) return;
+  const name = document.getElementById('tm-name').value.trim();
+  if (!name) { alert('請輸入任務名稱'); return; }
+  const sv  = document.getElementById('tm-cat').value;
+  const cat = sv === '__new__' ? (document.getElementById('tm-newcat').value.trim()||'其他') : sv;
+  if (cat && !CAT_COLORS[cat]) CAT_COLORS[cat] = randColor();
+  const tid  = editingTaskId || ('task-' + uid());
+  const task = {
+    id:     tid,
+    cat,
+    name,
+    worker: document.getElementById('tm-worker').value,
+    start:  document.getElementById('tm-start').value  || null,
+    end:    document.getElementById('tm-end').value    || null,
+    est:    parseInt(document.getElementById('tm-est').value)  || 0,
+    status: document.getElementById('tm-status').value,
+    pct:    Math.min(100, Math.max(0, parseInt(document.getElementById('tm-pct').value)||0)),
   };
-  if(task.status==='已完成') task.pct=100;
-  if(!projects[currentProjId].tasks) projects[currentProjId].tasks={};
-  projects[currentProjId].tasks[tid]=task;
-  await setDoc(doc(db,'projects',currentProjId),{tasks: projects[currentProjId].tasks},{merge:true});
+  if (task.status === '已完成') task.pct = 100;
+  if (!projects[currentProjId].tasks) projects[currentProjId].tasks = {};
+  projects[currentProjId].tasks[tid] = task;
+  await saveProject(currentProjId);
   closeTaskModal();
-  showToast(editingTaskId?'任務已更新':'任務已新增');
+  renderProjectContent();
 }
-async function deleteTask(){
-  if(!editingTaskId||!currentProjId) return;
-  if(!confirm('確定要刪除此任務？')) return;
-  const p=projects[currentProjId];
-  delete p.tasks[editingTaskId];
-  await setDoc(doc(db,'projects',currentProjId),{tasks: p.tasks},{merge:true});
+async function deleteTaskData() {
+  if (!editingTaskId || !currentProjId) return;
+  if (!confirm('確定要刪除此任務？')) return;
+  delete projects[currentProjId].tasks[editingTaskId];
+  await saveProject(currentProjId);
   closeTaskModal();
-  showToast('任務已刪除');
+  renderProjectContent();
 }
-window.openTaskModal=openTaskModal;
-window.closeTaskModal=closeTaskModal;
-window.saveTask=saveTask;
-window.deleteTask=deleteTask;
-window.copyLink=copyLink;
-window.renderTable=renderTable;
-window.deleteTask=deleteTask;
+window.openTaskModal  = openTaskModal;
+window.closeTaskModal = closeTaskModal;
+window.saveTask       = saveTaskData;
+window.deleteTask     = deleteTaskData;
 
-// Close modals on overlay click
-['projModal','vendorModal','taskModal'].forEach(id=>{
-  document.getElementById(id).addEventListener('click',e=>{ if(e.target.id===id) e.target.classList.remove('open'); });
+// ── CLOSE ON OVERLAY ──────────────────────────────────────────────────
+['projModal','vendorModal','taskModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', e => {
+    if (e.target.id === id) e.target.classList.remove('open');
+  });
 });
 
 // ── INIT ──────────────────────────────────────────────────────────────
 await loadProjects();
-
-// 如果沒有任何專案，預設建立聯采工程
-if(!Object.keys(projects).length){
-  const id='proj-liancai';
-  const data={
-    name:'聯采工廠建置工程', desc:'工廠建置工程進度管理',
-    start:'2026-05-15', deadline:'2026-06-30',
-    color:'#2563eb', vendors:['水電工程','冷凍工程','空調工程','庫板廠商','設備廠商'],
-    tasks:{
-      't01':{id:'t01',cat:'水電工程',name:'平面圖設計（已完成）',worker:'蕭顧問',start:'2026-05-15',end:'2026-05-19',est:5,status:'已完成',pct:100},
-      't02':{id:'t02',cat:'水電工程',name:'廠商報價議價匯款時間',worker:'岡村',start:'2026-05-15',end:'2026-05-19',est:5,status:'未開始',pct:0},
-      't03':{id:'t03',cat:'水電工程',name:'廁所(磁磚 安裝馬桶)',worker:'陳師傅',start:'2026-05-15',end:'2026-05-19',est:5,status:'未開始',pct:0},
-      't04':{id:'t04',cat:'水電工程',name:'油漆粉刷(地下室與一樓後面)',worker:'陳師傅',start:'2026-05-15',end:'2026-05-19',est:5,status:'未開始',pct:0},
-      't05':{id:'t05',cat:'工廠申請登記',name:'文件準備與申請',worker:'蕭顧問',start:'2026-05-15',end:'2026-06-03',est:20,status:'未開始',pct:0},
-      't06':{id:'t06',cat:'工廠申請登記',name:'環保文件法規查詢',worker:'蕭顧問',start:'2026-05-15',end:'2026-05-29',est:15,status:'未開始',pct:0},
-      't07':{id:'t07',cat:'水電工程',name:'架高工程防水等前置作業',worker:'水電工程',start:'2026-05-15',end:'2026-05-17',est:3,status:'未開始',pct:0},
-      't08':{id:'t08',cat:'水電工程',name:'水溝工程',worker:'水電工程',start:'2026-05-15',end:'2026-05-18',est:4,status:'未開始',pct:0},
-      't09':{id:'t09',cat:'設備',name:'架設水溝',worker:'居米',start:'2026-05-15',end:'2026-05-17',est:3,status:'未開始',pct:0},
-      't10':{id:'t10',cat:'設備',name:'後段地板油槽施作',worker:'居米',start:'2026-05-18',end:'2026-05-18',est:1,status:'未開始',pct:0},
-      't11':{id:'t11',cat:'水電工程',name:'架高地板架高',worker:'水電工程',start:'2026-05-18',end:'2026-05-21',est:4,status:'未開始',pct:0},
-      't12':{id:'t12',cat:'水電工程',name:'地板內部排水水管連接',worker:'水電工程',start:'2026-05-19',end:'2026-05-22',est:4,status:'未開始',pct:0},
-      't13':{id:'t13',cat:'水電工程',name:'廁所(電燈與開關)',worker:'陳師傅',start:'2026-05-20',end:'2026-05-20',est:1,status:'未開始',pct:0},
-      't14':{id:'t14',cat:'水電工程',name:'地下室燈具安裝',worker:'陳師傅',start:'2026-05-20',end:'2026-05-20',est:1,status:'未開始',pct:0},
-      't15':{id:'t15',cat:'水電工程',name:'截油槽',worker:'水電工程',start:'2026-05-23',end:'2026-05-26',est:4,status:'未開始',pct:0},
-      't16':{id:'t16',cat:'冷凍藏庫',name:'冷凍冷藏庫施作',worker:'冷凍工程',start:'2026-05-18',end:'2026-05-31',est:14,status:'未開始',pct:0},
-      't17':{id:'t17',cat:'室內空調',name:'室內空調',worker:'空調工程',start:'2026-05-18',end:'2026-05-24',est:7,status:'未開始',pct:0},
-      't18':{id:'t18',cat:'隔間',name:'庫板隔間',worker:'庫板廠商',start:'2026-05-27',end:'2026-05-31',est:5,status:'未開始',pct:0},
-      't19':{id:'t19',cat:'隔間',name:'輕鋼架天花板',worker:'庫板廠商',start:'2026-05-27',end:'2026-05-31',est:5,status:'未開始',pct:0},
-      't20':{id:'t20',cat:'隔間',name:'自動門',worker:'庫板廠商',start:'2026-06-01',end:'2026-06-03',est:3,status:'未開始',pct:0},
-      't21':{id:'t21',cat:'水電工程',name:'EXPOXY',worker:'水電工程',start:'2026-05-27',end:'2026-05-29',est:3,status:'未開始',pct:0},
-      't22':{id:'t22',cat:'設備',name:'不鏽鋼相關品製作',worker:'水電工程',start:'2026-06-01',end:'2026-06-07',est:7,status:'未開始',pct:0},
-      't23':{id:'t23',cat:'水電工程',name:'內部設備電力拉線配管',worker:'水電工程',start:'2026-06-01',end:'2026-06-04',est:4,status:'未開始',pct:0},
-      't24':{id:'t24',cat:'水電工程',name:'平板燈安裝',worker:'水電工程',start:'2026-06-01',end:'2026-06-02',est:2,status:'未開始',pct:0},
-      't25':{id:'t25',cat:'水電工程',name:'汙水設備',worker:'水電工程',start:'2026-06-01',end:'2026-06-04',est:4,status:'未開始',pct:0},
-      't26':{id:'t26',cat:'水電工程',name:'水槽與水龍頭安裝配線',worker:'水電工程',start:'2026-06-05',end:'2026-06-07',est:3,status:'未開始',pct:0},
-      't27':{id:'t27',cat:'水電工程',name:'台電過戶申請',worker:'水電工程',start:'2026-06-05',end:'2026-06-09',est:5,status:'未開始',pct:0},
-      't28':{id:'t28',cat:'設備',name:'設備定位安裝',worker:'設備廠商',start:'2026-06-08',end:'2026-06-09',est:2,status:'未開始',pct:0},
-      't29':{id:'t29',cat:'工廠申請登記',name:'GHP法規文件撰寫',worker:'蕭顧問',start:'2026-05-25',end:'2026-05-31',est:7,status:'未開始',pct:0},
-      't30':{id:'t30',cat:'工廠申請登記',name:'縣府送件會勘',worker:'蕭顧問',start:'2026-06-05',end:'2026-06-11',est:7,status:'未開始',pct:0},
-      't31':{id:'t31',cat:'工廠申請登記',name:'經發局文件整理與收集並送件',worker:'蕭顧問',start:'2026-06-10',end:'2026-06-16',est:7,status:'未開始',pct:0},
-      't32':{id:'t32',cat:'工廠申請登記',name:'環保文件送件',worker:'蕭顧問',start:'2026-06-18',end:'2026-06-22',est:5,status:'未開始',pct:0},
-      't33':{id:'t33',cat:'人員訓練 軟體建置',name:'廠商需準備相關軟件',worker:'Anna',start:'2026-06-24',end:'2026-06-28',est:5,status:'未開始',pct:0},
-    }
-  };
-  await saveProjectToDb(id,data);
-  projects[id]=data;
-  renderSidebar();
-  selectProject(id);
-}
+// 自動選第一個專案
+const ids = Object.keys(projects);
+if (ids.length > 0) selectProject(ids[0]);
 
 </script>
 </body>
