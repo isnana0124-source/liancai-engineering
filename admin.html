@@ -444,7 +444,10 @@ function renderVendors(){
         return `<div class="vendor-card">
           <div class="vendor-avatar" style="background:${col}">${v[0]}</div>
           <div class="vendor-info"><div class="vendor-name">${v}</div><div class="vendor-url">${url}</div></div>
-          <div class="vendor-actions"><button class="copy-btn" id="cb${i}" onclick="cpLink('${url}','cb${i}')">複製</button></div>
+          <div class="vendor-actions" style="display:flex;gap:6px;">
+        <button class="copy-btn" id="cb${i}" onclick="cpLink('${url}','cb${i}')">複製</button>
+        <a href="${url}" target="_blank" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:3px;">開啟 ↗</a>
+      </div>
         </div>`;
       }).join('')
     : '<div style="color:var(--text3);font-size:13px">尚未新增廠商</div>';
