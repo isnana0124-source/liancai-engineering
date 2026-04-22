@@ -388,7 +388,10 @@ function listenProject(projId) {
   const unsub = onSnapshot(doc(db,'projects',projId), snap => {
     if (snap.exists()) {
       projects[projId] = snap.data();
-      if (currentProjId === projId) renderProjectContent();
+      if (currentProjId === projId) {
+        renderProjectContent();
+        renderSidebar();
+      }
     }
   });
   unsubscribes.push(unsub);
@@ -434,9 +437,9 @@ function renderSidebar() {
 
 function selectProject(id) {
   currentProjId = id;
-  listenProject(id);
   renderSidebar();
   renderProjectContent();
+  listenProject(id);
 }
 window.selectProject = selectProject;
 
