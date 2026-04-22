@@ -467,11 +467,11 @@ function renderTable(){
   const p=projects[curId]; if(!p) return;
   const q=$('searchInput').value.toLowerCase();
   const rows=Object.entries(p.tasks||{}).filter(([,t])=>{
-    if(!t || typeof t !== 'object') return false;  // 過濾 null/undefined
+    if(!t || typeof t !== 'object') return false;
     if(filterSt!=='全部'&&t.status!==filterSt) return false;
     if(q&&![t.name||'',t.cat||'',t.worker||''].some(s=>s.toLowerCase().includes(q))) return false;
     return true;
-  });
+  }).sort((a,b)=>(a[1].start||'9999').localeCompare(b[1].start||'9999'));
   $('tblBody').innerHTML = rows.map(([tid,t])=>`
     <tr>
       <td><span class="chip" style="background:${cc(t.cat)}18;color:${cc(t.cat)};border:1px solid ${cc(t.cat)}33">${t.cat||'—'}</span></td>
