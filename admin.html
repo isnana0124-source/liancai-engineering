@@ -358,7 +358,12 @@ const pc=p=>p>=100?'var(--green)':p>=50?'var(--blue)':p>0?'var(--yellow)':'#e2e8
 // ── FIREBASE ──────────────────────────────────────────────────────────
 async function fbSave(id){
   try{
-    await setDoc(doc(db,'projects',id), JSON.parse(JSON.stringify(projects[id])));
+    const data = JSON.parse(JSON.stringify(projects[id]));
+    // 清除 tasks 中的 null 值
+    if(data.tasks){
+      Object.keys(data.tasks).forEach(k=>{ if(!data.tasks[k]) delete data.tasks[k]; });
+    }
+    await setDoc(doc(db,'projects',id), data);
     toast('✅ 已儲存');
   }catch(e){ toast('❌ '+e.message); console.error(e); }
 }
@@ -418,7 +423,7 @@ function renderContent(){
   $('projTitle').textContent    = p.name;
   $('projDesc').textContent     = p.desc||'';
   $('projDeadline').textContent = p.deadline?`⚑ 期限 ${p.deadline}`:'';
-  const tasks = Object.values(p.tasks||{});
+  const tasks = Object.values(p.tasks||{}).filter(t=>t&&typeof t==='object');
   $('s-total').textContent = tasks.length;
   $('s-done').textContent  = tasks.filter(t=>t.status==='已完成').length;
   $('s-doing').textContent = tasks.filter(t=>t.status==='進行中').length;
@@ -462,8 +467,9 @@ function renderTable(){
   const p=projects[curId]; if(!p) return;
   const q=$('searchInput').value.toLowerCase();
   const rows=Object.entries(p.tasks||{}).filter(([,t])=>{
+    if(!t || typeof t !== 'object') return false;  // 過濾 null/undefined
     if(filterSt!=='全部'&&t.status!==filterSt) return false;
-    if(q&&![t.name,t.cat,t.worker||''].some(s=>s.toLowerCase().includes(q))) return false;
+    if(q&&![t.name||'',t.cat||'',t.worker||''].some(s=>s.toLowerCase().includes(q))) return false;
     return true;
   });
   $('tblBody').innerHTML = rows.map(([tid,t])=>`
