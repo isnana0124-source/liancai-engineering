@@ -332,481 +332,320 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAVI40syAU_DrKpHK8VinCTJjSNNQ577_Y",
-  authDomain: "lian-cai.firebaseapp.com",
-  projectId: "lian-cai",
-  storageBucket: "lian-cai.firebasestorage.app",
-  messagingSenderId: "85226153774",
-  appId: "1:85226153774:web:5db8f25cfee2536817bcbf"
+const FB = {
+  apiKey:"AIzaSyAVI40syAU_DrKpHK8VinCTJjSNNQ577_Y",
+  authDomain:"lian-cai.firebaseapp.com",
+  projectId:"lian-cai",
+  storageBucket:"lian-cai.firebasestorage.app",
+  messagingSenderId:"85226153774",
+  appId:"1:85226153774:web:5db8f25cfee2536817bcbf"
 };
-const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
-
-// ── 儲存整個 project 到 Firebase（最穩定方式）──────────────────────────
-async function saveProject(projId) {
-  try {
-    await setDoc(doc(db,'projects',projId), projects[projId]);
-    showToast('✅ 已儲存');
-  } catch(e) {
-    showToast('❌ 儲存失敗：' + e.message);
-    console.error('Firebase error:', e);
-  }
-}
+const db = getFirestore(initializeApp(FB));
 
 // ── STATE ─────────────────────────────────────────────────────────────
-let projects = {};
-let currentProjId = null;
-let editingTaskId = null;
-let editingProjId = null;
-let filterStatus  = '全部';
-let unsubscribes  = [];
+let projects={}, curId=null, editTaskId=null, editProjId=null, filterSt='全部', unsub=null;
+const PALETTE=['#2563eb','#0891b2','#7c3aed','#e05656','#16a34a','#d97706','#c026d3','#059669'];
+let CAT_COLORS={'水電工程':'#2563eb','冷凍藏庫':'#0891b2','設備':'#7c3aed','隔間':'#e05656','室內空調':'#0284c7','工廠申請登記':'#16a34a','人員訓練 軟體建置':'#c026d3','其他':'#64748b'};
+let pi=0;
+const rc=()=>PALETTE[pi++%PALETTE.length];
+const cc=c=>CAT_COLORS[c]||'#64748b';
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const $=id=>document.getElementById(id);
+const toast=msg=>{const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);};
+const bdg=s=>s==='已完成'?`<span class="badge b-done"><span class="bd"></span>${s}</span>`:s==='進行中'?`<span class="badge b-doing"><span class="bd"></span>${s}</span>`:`<span class="badge b-pend"><span class="bd"></span>${s}</span>`;
+const pc=p=>p>=100?'var(--green)':p>=50?'var(--blue)':p>0?'var(--yellow)':'#e2e8f0';
 
-const PALETTE = ['#2563eb','#0891b2','#7c3aed','#e05656','#16a34a','#d97706','#c026d3','#059669','#e63e6d','#0284c7'];
-let CAT_COLORS = {
-  '水電工程':'#2563eb','冷凍藏庫':'#0891b2','設備':'#7c3aed','隔間':'#e05656',
-  '室內空調':'#0284c7','工廠申請登記':'#16a34a','人員訓練 軟體建置':'#c026d3','其他':'#64748b',
-};
-let _pIdx = 0;
-function randColor(){ return PALETTE[(_pIdx++)%PALETTE.length]; }
-function catColor(c){ return CAT_COLORS[c]||'#64748b'; }
-function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
-
-// ── FIREBASE LOAD ─────────────────────────────────────────────────────
-async function loadProjects() {
-  const snap = await getDocs(collection(db,'projects'));
-  projects = {};
-  snap.forEach(d => { projects[d.id] = d.data(); });
-  document.getElementById('loading').style.display = 'none';
-  setSyncStatus(true);
-  renderSidebar();
+// ── FIREBASE ──────────────────────────────────────────────────────────
+async function fbSave(id){
+  try{
+    await setDoc(doc(db,'projects',id), JSON.parse(JSON.stringify(projects[id])));
+    toast('✅ 已儲存');
+  }catch(e){ toast('❌ '+e.message); console.error(e); }
 }
 
-function listenProject(projId) {
-  unsubscribes.forEach(u=>u());
-  unsubscribes = [];
-  const unsub = onSnapshot(doc(db,'projects',projId), snap => {
-    if (snap.exists()) {
-      projects[projId] = snap.data();
-      if (currentProjId === projId) {
-        renderProjectContent();
-        renderSidebar();
-      }
+// ── INIT：一次性讀取所有資料 ─────────────────────────────────────────
+async function init(){
+  try {
+    const snap = await getDocs(collection(db,'projects'));
+    projects = {};
+    snap.forEach(d => { projects[d.id] = d.data(); });
+    $('loading').style.display = 'none';
+    $('syncStatus').innerHTML = '<span class="sync-dot"></span>即時同步';
+    renderSidebar();
+    const ids = Object.keys(projects);
+    if(ids.length){ setCur(ids[0]); }
+  } catch(e) {
+    $('loading').style.display = 'none';
+    alert('Firebase 連線失敗：' + e.message);
+    console.error(e);
+  }
+}
+
+// ── 設定目前專案並監聽 ────────────────────────────────────────────────
+function setCur(id){
+  curId = id;
+  if(unsub){ unsub(); unsub=null; }
+  renderSidebar();
+  renderContent();
+  // 監聽即時更新
+  unsub = onSnapshot(doc(db,'projects',id), snap=>{
+    if(snap.exists()){
+      projects[id] = snap.data();
+      if(curId===id){ renderContent(); }
     }
   });
-  unsubscribes.push(unsub);
 }
-
-// ── UI HELPERS ────────────────────────────────────────────────────────
-function setSyncStatus(ok) {
-  document.getElementById('syncStatus').innerHTML = ok
-    ? '<span class="sync-dot"></span>即時同步'
-    : '<span class="sync-dot sync-off"></span>連線中';
-}
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2500);
-}
-function bdg(s) {
-  if(s==='已完成') return `<span class="badge b-done"><span class="bd"></span>${s}</span>`;
-  if(s==='進行中') return `<span class="badge b-doing"><span class="bd"></span>${s}</span>`;
-  return `<span class="badge b-pend"><span class="bd"></span>${s}</span>`;
-}
-function pColor(p){ return p>=100?'var(--green)':p>=50?'var(--blue)':p>0?'var(--yellow)':'#e2e8f0'; }
+window.selectProject = id => { setCur(id); };
 
 // ── SIDEBAR ───────────────────────────────────────────────────────────
-function renderSidebar() {
-  const list = document.getElementById('projList');
-  const ids  = Object.keys(projects);
-  if (!ids.length) {
-    list.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:8px">尚無專案</div>';
-    return;
-  }
-  list.innerHTML = ids.map(id => {
-    const p   = projects[id];
-    const cnt = p.tasks ? Object.keys(p.tasks).length : 0;
-    return `<div class="proj-item${currentProjId===id?' active':''}" onclick="selectProject('${id}')">
+function renderSidebar(){
+  const el = $('projList');
+  const ids = Object.keys(projects);
+  el.innerHTML = ids.map(id=>{
+    const p=projects[id], n=p.tasks?Object.keys(p.tasks).length:0;
+    return `<div class="proj-item${curId===id?' active':''}" onclick="selectProject('${id}')">
       <div class="proj-dot" style="background:${p.color||'#2563eb'}"></div>
       <div class="proj-name">${p.name}</div>
-      <div class="proj-cnt">${cnt}</div>
-    </div>`;
-  }).join('');
+      <div class="proj-cnt">${n}</div></div>`;
+  }).join('') || '<div style="font-size:12px;color:var(--text3);padding:8px">尚無專案</div>';
 }
 
-function selectProject(id) {
-  currentProjId = id;
+// ── CONTENT ───────────────────────────────────────────────────────────
+function renderContent(){
+  const p = projects[curId]; if(!p) return;
+  $('emptyState').style.display='none';
+  $('projContent').style.display='flex';
+  $('projTitle').textContent    = p.name;
+  $('projDesc').textContent     = p.desc||'';
+  $('projDeadline').textContent = p.deadline?`⚑ 期限 ${p.deadline}`:'';
+  const tasks = Object.values(p.tasks||{});
+  $('s-total').textContent = tasks.length;
+  $('s-done').textContent  = tasks.filter(t=>t.status==='已完成').length;
+  $('s-doing').textContent = tasks.filter(t=>t.status==='進行中').length;
+  $('s-pend').textContent  = tasks.filter(t=>t.status==='未開始').length;
   renderSidebar();
-  renderProjectContent();
-  listenProject(id);
-}
-window.selectProject = selectProject;
-
-// ── PROJECT CONTENT ───────────────────────────────────────────────────
-function renderProjectContent() {
-  const p = projects[currentProjId];
-  if (!p) return;
-  document.getElementById('emptyState').style.display = 'none';
-  document.getElementById('projContent').style.display = 'flex';
-  document.getElementById('projTitle').textContent    = p.name;
-  document.getElementById('projDesc').textContent     = p.desc || '';
-  document.getElementById('projDeadline').textContent = p.deadline ? `⚑ 期限 ${p.deadline}` : '';
-
-  const tasks = p.tasks ? Object.values(p.tasks) : [];
-  document.getElementById('s-total').textContent = tasks.length;
-  document.getElementById('s-done').textContent  = tasks.filter(t=>t.status==='已完成').length;
-  document.getElementById('s-doing').textContent = tasks.filter(t=>t.status==='進行中').length;
-  document.getElementById('s-pend').textContent  = tasks.filter(t=>t.status==='未開始').length;
-
-  renderVendorLinks();
+  renderVendors();
   renderTable();
 }
 
-// ── VENDOR LINKS ──────────────────────────────────────────────────────
-function renderVendorLinks() {
-  const p       = projects[currentProjId];
-  const vendors = p.vendors || [];
-  const base    = window.location.href.replace('admin.html','');
-  const container = document.getElementById('vendorLinks');
-  if (!vendors.length) {
-    container.innerHTML = '<div style="color:var(--text3);font-size:13px">尚未新增廠商，點右上角「管理廠商」新增</div>';
-    return;
-  }
-  container.innerHTML = vendors.map((v, i) => {
-    const url   = `${base}vendor.html?project=${encodeURIComponent(currentProjId)}&vendor=${encodeURIComponent(v)}`;
-    const color = PALETTE[i % PALETTE.length];
-    return `<div class="vendor-card">
-      <div class="vendor-avatar" style="background:${color}">${v.charAt(0)}</div>
-      <div class="vendor-info">
-        <div class="vendor-name">${v}</div>
-        <div class="vendor-url">${url}</div>
-      </div>
-      <div class="vendor-actions">
-        <button class="copy-btn" id="cpbtn-${i}" onclick="copyLink('${url}','cpbtn-${i}')">複製</button>
-      </div>
-    </div>`;
-  }).join('');
+// ── VENDORS ───────────────────────────────────────────────────────────
+function renderVendors(){
+  const p=projects[curId], vendors=p.vendors||[];
+  const base=location.href.replace('admin.html','');
+  $('vendorLinks').innerHTML = vendors.length
+    ? vendors.map((v,i)=>{
+        const url=`${base}vendor.html?project=${encodeURIComponent(curId)}&vendor=${encodeURIComponent(v)}`;
+        const col=PALETTE[i%PALETTE.length];
+        return `<div class="vendor-card">
+          <div class="vendor-avatar" style="background:${col}">${v[0]}</div>
+          <div class="vendor-info"><div class="vendor-name">${v}</div><div class="vendor-url">${url}</div></div>
+          <div class="vendor-actions"><button class="copy-btn" id="cb${i}" onclick="cpLink('${url}','cb${i}')">複製</button></div>
+        </div>`;
+      }).join('')
+    : '<div style="color:var(--text3);font-size:13px">尚未新增廠商</div>';
 }
-
-function copyLink(url, btnId) {
-  navigator.clipboard.writeText(url).then(() => {
-    const btn = document.getElementById(btnId);
-    btn.textContent = '✓ 已複製';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = '複製'; btn.classList.remove('copied'); }, 2000);
+window.cpLink = (url,id)=>{
+  navigator.clipboard.writeText(url).then(()=>{
+    const b=$(id); b.textContent='✓ 複製'; b.classList.add('copied');
+    setTimeout(()=>{b.textContent='複製';b.classList.remove('copied');},2000);
   });
-}
-window.copyLink = copyLink;
-
-// ── FILTER ────────────────────────────────────────────────────────────
-function setFilter(s) {
-  filterStatus = s;
-  document.querySelectorAll('.pill').forEach(b => b.classList.toggle('active', b.textContent.trim() === s));
-  renderTable();
-}
-window.setFilter = setFilter;
+};
+window.copyLink = window.cpLink;
 
 // ── TABLE ─────────────────────────────────────────────────────────────
-function renderTable() {
-  const p = projects[currentProjId];
-  if (!p) return;
-  const q = document.getElementById('searchInput').value.toLowerCase();
-  const tasks = Object.entries(p.tasks || {}).filter(([, t]) => {
-    if (filterStatus !== '全部' && t.status !== filterStatus) return false;
-    if (q && ![t.name, t.cat, t.worker||''].some(s => s.toLowerCase().includes(q))) return false;
+window.setFilter = s=>{
+  filterSt=s;
+  document.querySelectorAll('.pill').forEach(b=>b.classList.toggle('active',b.textContent.trim()===s));
+  renderTable();
+};
+function renderTable(){
+  const p=projects[curId]; if(!p) return;
+  const q=$('searchInput').value.toLowerCase();
+  const rows=Object.entries(p.tasks||{}).filter(([,t])=>{
+    if(filterSt!=='全部'&&t.status!==filterSt) return false;
+    if(q&&![t.name,t.cat,t.worker||''].some(s=>s.toLowerCase().includes(q))) return false;
     return true;
   });
-  document.getElementById('tblBody').innerHTML = tasks.map(([tid, t]) => `
+  $('tblBody').innerHTML = rows.map(([tid,t])=>`
     <tr>
-      <td><span class="chip" style="background:${catColor(t.cat)}18;color:${catColor(t.cat)};border:1px solid ${catColor(t.cat)}33">${t.cat||'—'}</span></td>
-      <td style="font-weight:600;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.name}</td>
+      <td><span class="chip" style="background:${cc(t.cat)}18;color:${cc(t.cat)};border:1px solid ${cc(t.cat)}33">${t.cat||'—'}</span></td>
+      <td style="font-weight:600;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${t.name}">${t.name}</td>
       <td style="color:var(--text2)">${t.worker||'—'}</td>
-      <td class="td-m ec" onclick="inlineEdit('${tid}','start',this,'date')">${t.start||'—'}</td>
-      <td class="td-m ec" onclick="inlineEdit('${tid}','end',this,'date')">${t.end||'—'}</td>
-      <td class="td-m ec" onclick="inlineEdit('${tid}','est',this,'number')">${t.est||'—'}</td>
-      <td class="ec" onclick="inlineEdit('${tid}','status',this,'status')">${bdg(t.status)}</td>
-      <td class="ec" onclick="inlineEdit('${tid}','pct',this,'number')">
-        <div class="pbar"><div class="pbar-t"><div class="pbar-f" style="width:${t.pct}%;background:${pColor(t.pct)}"></div></div><div class="pbar-n">${t.pct}%</div></div>
+      <td class="td-m ec" onclick="ie('${tid}','start',this,'date')">${t.start||'—'}</td>
+      <td class="td-m ec" onclick="ie('${tid}','end',this,'date')">${t.end||'—'}</td>
+      <td class="td-m ec" onclick="ie('${tid}','est',this,'number')">${t.est||'—'}</td>
+      <td class="ec" onclick="ie('${tid}','status',this,'status')">${bdg(t.status)}</td>
+      <td class="ec" onclick="ie('${tid}','pct',this,'number')">
+        <div class="pbar"><div class="pbar-t"><div class="pbar-f" style="width:${t.pct}%;background:${pc(t.pct)}"></div></div><div class="pbar-n">${t.pct}%</div></div>
       </td>
       <td><button onclick="openTaskModal('${tid}')" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;color:var(--text2);">編輯</button></td>
-    </tr>`).join('');
+    </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text3)">尚無任務</td></tr>';
 }
 window.renderTable = renderTable;
 
 // ── INLINE EDIT ───────────────────────────────────────────────────────
-function inlineEdit(tid, field, el, type) {
-  if (el.querySelector('input,select')) return;
-  const p = projects[currentProjId];
-  if (!p || !p.tasks || !p.tasks[tid]) return;
-  const task    = p.tasks[tid];
-  const display = el.innerHTML;
+window.ie = function(tid,field,el,type){
+  if(el.querySelector('input,select')) return;
+  const p=projects[curId]; if(!p||!p.tasks||!p.tasks[tid]) return;
+  const task=p.tasks[tid], dsp=el.innerHTML;
   let inp;
-  if (type === 'date') {
-    inp = document.createElement('input');
-    inp.type = 'date';
-    inp.value = task[field] || '';
-    inp.style.cssText = 'background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:JetBrains Mono,monospace;width:132px;outline:none;';
-  } else if (type === 'number') {
-    inp = document.createElement('input');
-    inp.type = 'number';
-    inp.value = task[field] || 0;
-    inp.min = field === 'pct' ? 0 : 1;
-    inp.max = field === 'pct' ? 100 : 9999;
-    inp.style.cssText = 'background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:JetBrains Mono,monospace;width:72px;outline:none;';
-  } else if (type === 'status') {
-    inp = document.createElement('select');
-    ['未開始','進行中','已完成'].forEach(s => {
-      const o = document.createElement('option');
-      o.value = s; o.textContent = s;
-      if (s === task[field]) o.selected = true;
-      inp.appendChild(o);
-    });
-    inp.style.cssText = 'background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;outline:none;';
+  if(type==='date'){
+    inp=document.createElement('input'); inp.type='date'; inp.value=task[field]||'';
+    inp.style.cssText='background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:#1a1f2e;padding:3px 8px;font-size:12px;width:132px;outline:none;';
+  } else if(type==='number'){
+    inp=document.createElement('input'); inp.type='number'; inp.value=task[field]||0;
+    inp.min=field==='pct'?0:1; inp.max=field==='pct'?100:9999;
+    inp.style.cssText='background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:#1a1f2e;padding:3px 8px;font-size:12px;width:72px;outline:none;';
+  } else {
+    inp=document.createElement('select');
+    ['未開始','進行中','已完成'].forEach(s=>{const o=document.createElement('option');o.value=s;o.textContent=s;if(s===task[field])o.selected=true;inp.appendChild(o);});
+    inp.style.cssText='background:#fff;border:1.5px solid var(--blue);border-radius:6px;color:#1a1f2e;padding:3px 8px;font-size:12px;outline:none;';
   }
-
-  async function commit() {
-    let v = inp.value;
-    if (type === 'number') { v = parseInt(v)||0; if(field==='pct') v = Math.min(100, Math.max(0, v)); }
-    if (type === 'date') v = v || null;
-    // 更新本地
-    task[field] = v;
-    if (field === 'status' && v === '已完成') task.pct = 100;
-    if (field === 'pct'    && v === 100)      task.status = '已完成';
-    // 儲存到 Firebase
-    await saveProject(currentProjId);
+  async function commit(){
+    let v=inp.value;
+    if(type==='number'){v=parseInt(v)||0;if(field==='pct')v=Math.min(100,Math.max(0,v));}
+    if(type==='date') v=v||null;
+    task[field]=v;
+    if(field==='status'&&v==='已完成') task.pct=100;
+    if(field==='pct'&&v===100) task.status='已完成';
+    await fbSave(curId);
     renderTable();
   }
-
-  inp.addEventListener('blur', commit);
-  inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter') inp.blur();
-    if (e.key === 'Escape') { el.innerHTML = display; }
-  });
-  el.innerHTML = '';
-  el.appendChild(inp);
-  inp.focus();
-  if (inp.select && type !== 'date') inp.select();
-}
-window.inlineEdit = inlineEdit;
-
-// ── CATEGORY ─────────────────────────────────────────────────────────
-function syncCatSel(sel, cur) {
-  sel.innerHTML = Object.keys(CAT_COLORS)
-    .map(c => `<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
-  sel.innerHTML += `<option value="__new__" style="color:var(--blue);font-weight:700">＋ 新增類別…</option>`;
-}
-function handleCatChange(sel) {
-  const row = document.getElementById('newcat-row');
-  if (sel.value === '__new__') {
-    row.classList.add('show');
-    document.getElementById('tm-newcat').value = '';
-    document.getElementById('tm-newcat-color').value = randColor();
-    document.getElementById('tm-newcat').focus();
-  } else {
-    row.classList.remove('show');
-  }
-}
-function confirmNewCat() {
-  const name  = document.getElementById('tm-newcat').value.trim();
-  const color = document.getElementById('tm-newcat-color').value;
-  if (!name) { alert('請輸入類別名稱'); return; }
-  if (!CAT_COLORS[name]) CAT_COLORS[name] = color;
-  syncCatSel(document.getElementById('tm-cat'), name);
-  document.getElementById('newcat-row').classList.remove('show');
-}
-window.handleCatChange = handleCatChange;
-window.confirmNewCat   = confirmNewCat;
+  inp.addEventListener('blur',commit);
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape')el.innerHTML=dsp;});
+  el.innerHTML=''; el.appendChild(inp); inp.focus();
+  if(inp.select&&type!=='date') inp.select();
+};
+window.inlineEdit = window.ie;
 
 // ── PROJECT MODAL ─────────────────────────────────────────────────────
-function openProjModal() {
-  editingProjId = null;
-  document.getElementById('projModalTitle').textContent = '新增專案';
-  document.getElementById('pm-name').value     = '';
-  document.getElementById('pm-desc').value     = '';
-  document.getElementById('pm-start').value    = '';
-  document.getElementById('pm-deadline').value = '';
-  document.getElementById('pm-color').value    = '#2563eb';
-  document.getElementById('projModal').classList.add('open');
-}
-function openProjEditModal() {
-  const p = projects[currentProjId]; if (!p) return;
-  editingProjId = currentProjId;
-  document.getElementById('projModalTitle').textContent = '編輯專案';
-  document.getElementById('pm-name').value     = p.name     || '';
-  document.getElementById('pm-desc').value     = p.desc     || '';
-  document.getElementById('pm-start').value    = p.start    || '';
-  document.getElementById('pm-deadline').value = p.deadline || '';
-  document.getElementById('pm-color').value    = p.color    || '#2563eb';
-  document.getElementById('projModal').classList.add('open');
-}
-function closeProjModal() { document.getElementById('projModal').classList.remove('open'); }
-async function saveProjData() {
-  const name = document.getElementById('pm-name').value.trim();
-  if (!name) { alert('請輸入專案名稱'); return; }
-  const id       = editingProjId || ('proj-' + uid());
-  const existing = projects[id]  || {};
-  projects[id] = {
-    name,
-    desc:     document.getElementById('pm-desc').value,
-    start:    document.getElementById('pm-start').value    || null,
-    deadline: document.getElementById('pm-deadline').value || null,
-    color:    document.getElementById('pm-color').value,
-    vendors:  existing.vendors || [],
-    tasks:    existing.tasks   || {},
-  };
-  await saveProject(id);
-  closeProjModal();
-  renderSidebar();
-  if (!editingProjId) selectProject(id);
-  else renderProjectContent();
-}
-async function deleteProjData() {
-  if (!currentProjId) return;
-  if (!confirm(`確定要刪除專案「${projects[currentProjId]?.name}」嗎？`)) return;
-  await deleteDoc(doc(db,'projects', currentProjId));
-  delete projects[currentProjId];
-  currentProjId = null;
-  document.getElementById('projContent').style.display  = 'none';
-  document.getElementById('emptyState').style.display   = 'flex';
-  renderSidebar();
-  showToast('專案已刪除');
-}
-window.openProjModal     = openProjModal;
-window.openProjEditModal = openProjEditModal;
-window.closeProjModal    = closeProjModal;
-window.saveProject_form  = saveProjData;
-window.deleteProject     = deleteProjData;
+window.openProjModal = ()=>{
+  editProjId=null;
+  $('projModalTitle').textContent='新增專案';
+  ['pm-name','pm-desc','pm-start','pm-deadline'].forEach(id=>$(id).value='');
+  $('pm-color').value='#2563eb';
+  $('projModal').classList.add('open');
+};
+window.openProjEditModal = ()=>{
+  const p=projects[curId]; if(!p) return;
+  editProjId=curId;
+  $('projModalTitle').textContent='編輯專案';
+  $('pm-name').value=$('pm-desc').value=$('pm-start').value=$('pm-deadline').value=$('pm-color').value='';
+  $('pm-name').value=p.name||''; $('pm-desc').value=p.desc||'';
+  $('pm-start').value=p.start||''; $('pm-deadline').value=p.deadline||'';
+  $('pm-color').value=p.color||'#2563eb';
+  $('projModal').classList.add('open');
+};
+window.closeProjModal = ()=>$('projModal').classList.remove('open');
+window.saveProject_form = async()=>{
+  const name=$('pm-name').value.trim(); if(!name){alert('請輸入專案名稱');return;}
+  const id=editProjId||('proj-'+uid());
+  const ex=projects[id]||{};
+  projects[id]={name,desc:$('pm-desc').value,start:$('pm-start').value||null,deadline:$('pm-deadline').value||null,color:$('pm-color').value,vendors:ex.vendors||[],tasks:ex.tasks||{}};
+  await fbSave(id);
+  window.closeProjModal();
+  if(!editProjId) setCur(id); else renderContent();
+};
+window.deleteProject = async()=>{
+  if(!curId||!confirm(`確定刪除「${projects[curId]?.name}」？`)) return;
+  if(unsub){unsub();unsub=null;}
+  await deleteDoc(doc(db,'projects',curId));
+  delete projects[curId]; curId=null;
+  $('projContent').style.display='none'; $('emptyState').style.display='flex';
+  renderSidebar(); toast('專案已刪除');
+};
 
 // ── VENDOR MODAL ──────────────────────────────────────────────────────
-function openVendorModal() {
-  renderVmList();
-  document.getElementById('vendorModal').classList.add('open');
+window.openVendorModal = ()=>{ renderVmList(); $('vendorModal').classList.add('open'); };
+window.closeVendorModal = ()=>{ $('vendorModal').classList.remove('open'); renderVendors(); };
+function renderVmList(){
+  const v=projects[curId]?.vendors||[];
+  $('vmList').innerHTML=v.length?v.map((n,i)=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:8px;">
+      <div style="flex:1;font-weight:600">${n}</div>
+      <button onclick="rmVendor(${i})" style="background:none;border:1.5px solid var(--red);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;">移除</button>
+    </div>`).join('')
+  :'<div style="color:var(--text3);font-size:13px;padding:8px">尚未新增廠商</div>';
 }
-function closeVendorModal() {
-  document.getElementById('vendorModal').classList.remove('open');
-  renderVendorLinks();
-}
-function renderVmList() {
-  const vendors = projects[currentProjId]?.vendors || [];
-  document.getElementById('vmList').innerHTML = vendors.length
-    ? vendors.map((v, i) => `
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:8px;">
-          <div style="flex:1;font-weight:600">${v}</div>
-          <button onclick="removeVendorItem(${i})" style="background:none;border:1.5px solid var(--red);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;">移除</button>
-        </div>`).join('')
-    : '<div style="color:var(--text3);font-size:13px;padding:8px">尚未新增廠商</div>';
-}
-async function addVendorItem() {
-  const name = document.getElementById('vm-name').value.trim();
-  if (!name) return;
-  const p = projects[currentProjId]; if (!p) return;
-  if (!p.vendors) p.vendors = [];
-  if (p.vendors.includes(name)) { showToast('廠商已存在'); return; }
-  p.vendors.push(name);
-  await saveProject(currentProjId);
-  document.getElementById('vm-name').value = '';
-  renderVmList();
-}
-async function removeVendorItem(idx) {
-  const p = projects[currentProjId]; if (!p) return;
-  if (!confirm(`確定移除廠商「${p.vendors[idx]}」？`)) return;
-  p.vendors.splice(idx, 1);
-  await saveProject(currentProjId);
-  renderVmList();
-}
-window.openVendorModal  = openVendorModal;
-window.closeVendorModal = closeVendorModal;
-window.addVendor        = addVendorItem;
-window.removeVendorItem = removeVendorItem;
+window.addVendor = async()=>{
+  const n=$('vm-name').value.trim(); if(!n) return;
+  const p=projects[curId]; if(!p.vendors) p.vendors=[];
+  if(p.vendors.includes(n)){toast('廠商已存在');return;}
+  p.vendors.push(n); await fbSave(curId);
+  $('vm-name').value=''; renderVmList(); toast('廠商已新增');
+};
+window.rmVendor = async i=>{
+  const p=projects[curId];
+  if(!confirm(`確定移除廠商「${p.vendors[i]}」？`)) return;
+  p.vendors.splice(i,1); await fbSave(curId); renderVmList(); toast('廠商已移除');
+};
+window.removeVendorItem = window.rmVendor;
 
 // ── TASK MODAL ────────────────────────────────────────────────────────
-function openTaskModal(tid) {
-  editingTaskId = tid || null;
-  const sel = document.getElementById('tm-cat');
-  if (tid) {
-    const t = projects[currentProjId]?.tasks?.[tid]; if (!t) return;
-    document.getElementById('tmTitle').textContent   = '編輯任務';
-    document.getElementById('tm-name').value         = t.name   || '';
-    syncCatSel(sel, t.cat || '水電工程');
-    document.getElementById('tm-status').value       = t.status || '未開始';
-    document.getElementById('tm-start').value        = t.start  || '';
-    document.getElementById('tm-end').value          = t.end    || '';
-    document.getElementById('tm-est').value          = t.est    || '';
-    document.getElementById('tm-pct').value          = t.pct    || 0;
-    document.getElementById('tm-worker').value       = t.worker || '';
-    document.getElementById('tmDelBtn').style.display = 'block';
+function syncCatSel(sel,cur){
+  sel.innerHTML=Object.keys(CAT_COLORS).map(c=>`<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
+  sel.innerHTML+=`<option value="__new__" style="color:var(--blue);font-weight:700">＋ 新增類別…</option>`;
+}
+window.handleCatChange = sel=>{
+  const r=$('newcat-row');
+  if(sel.value==='__new__'){r.classList.add('show');$('tm-newcat').value='';$('tm-newcat-color').value=rc();$('tm-newcat').focus();}
+  else r.classList.remove('show');
+};
+window.confirmNewCat = ()=>{
+  const n=$('tm-newcat').value.trim(),c=$('tm-newcat-color').value;
+  if(!n){alert('請輸入類別名稱');return;}
+  if(!CAT_COLORS[n]) CAT_COLORS[n]=c;
+  syncCatSel($('tm-cat'),n); $('newcat-row').classList.remove('show');
+};
+window.openTaskModal = tid=>{
+  editTaskId=tid||null;
+  const sel=$('tm-cat');
+  if(tid){
+    const t=projects[curId]?.tasks?.[tid]; if(!t) return;
+    $('tmTitle').textContent='編輯任務';
+    $('tm-name').value=t.name||''; syncCatSel(sel,t.cat||'水電工程');
+    $('tm-status').value=t.status||'未開始'; $('tm-start').value=t.start||'';
+    $('tm-end').value=t.end||''; $('tm-est').value=t.est||'';
+    $('tm-pct').value=t.pct||0; $('tm-worker').value=t.worker||'';
+    $('tmDelBtn').style.display='block';
   } else {
-    document.getElementById('tmTitle').textContent    = '新增任務';
-    document.getElementById('tm-name').value          = '';
-    syncCatSel(sel, '水電工程');
-    document.getElementById('tm-status').value        = '未開始';
-    document.getElementById('tm-start').value         = '';
-    document.getElementById('tm-end').value           = '';
-    document.getElementById('tm-est').value           = '';
-    document.getElementById('tm-pct').value           = 0;
-    document.getElementById('tm-worker').value        = '';
-    document.getElementById('tmDelBtn').style.display = 'none';
+    $('tmTitle').textContent='新增任務';
+    $('tm-name').value=''; syncCatSel(sel,'水電工程');
+    $('tm-status').value='未開始'; $('tm-start').value='';
+    $('tm-end').value=''; $('tm-est').value=''; $('tm-pct').value=0; $('tm-worker').value='';
+    $('tmDelBtn').style.display='none';
   }
-  document.getElementById('newcat-row').classList.remove('show');
-  document.getElementById('taskModal').classList.add('open');
-}
-function closeTaskModal() {
-  document.getElementById('taskModal').classList.remove('open');
-  editingTaskId = null;
-}
-async function saveTaskData() {
-  if (!currentProjId) return;
-  const name = document.getElementById('tm-name').value.trim();
-  if (!name) { alert('請輸入任務名稱'); return; }
-  const sv  = document.getElementById('tm-cat').value;
-  const cat = sv === '__new__' ? (document.getElementById('tm-newcat').value.trim()||'其他') : sv;
-  if (cat && !CAT_COLORS[cat]) CAT_COLORS[cat] = randColor();
-  const tid  = editingTaskId || ('task-' + uid());
-  const task = {
-    id:     tid,
-    cat,
-    name,
-    worker: document.getElementById('tm-worker').value,
-    start:  document.getElementById('tm-start').value  || null,
-    end:    document.getElementById('tm-end').value    || null,
-    est:    parseInt(document.getElementById('tm-est').value)  || 0,
-    status: document.getElementById('tm-status').value,
-    pct:    Math.min(100, Math.max(0, parseInt(document.getElementById('tm-pct').value)||0)),
-  };
-  if (task.status === '已完成') task.pct = 100;
-  if (!projects[currentProjId].tasks) projects[currentProjId].tasks = {};
-  projects[currentProjId].tasks[tid] = task;
-  await saveProject(currentProjId);
-  closeTaskModal();
-  renderProjectContent();
-}
-async function deleteTaskData() {
-  if (!editingTaskId || !currentProjId) return;
-  if (!confirm('確定要刪除此任務？')) return;
-  delete projects[currentProjId].tasks[editingTaskId];
-  await saveProject(currentProjId);
-  closeTaskModal();
-  renderProjectContent();
-}
-window.openTaskModal  = openTaskModal;
-window.closeTaskModal = closeTaskModal;
-window.saveTask       = saveTaskData;
-window.deleteTask     = deleteTaskData;
+  $('newcat-row').classList.remove('show');
+  $('taskModal').classList.add('open');
+};
+window.closeTaskModal = ()=>{ $('taskModal').classList.remove('open'); editTaskId=null; };
+window.saveTask = async()=>{
+  if(!curId) return;
+  const name=$('tm-name').value.trim(); if(!name){alert('請輸入任務名稱');return;}
+  const sv=$('tm-cat').value;
+  const cat=sv==='__new__'?($('tm-newcat').value.trim()||'其他'):sv;
+  if(cat&&!CAT_COLORS[cat]) CAT_COLORS[cat]=rc();
+  const tid=editTaskId||('task-'+uid());
+  const task={id:tid,cat,name,worker:$('tm-worker').value,start:$('tm-start').value||null,end:$('tm-end').value||null,est:parseInt($('tm-est').value)||0,status:$('tm-status').value,pct:Math.min(100,Math.max(0,parseInt($('tm-pct').value)||0))};
+  if(task.status==='已完成') task.pct=100;
+  if(!projects[curId].tasks) projects[curId].tasks={};
+  projects[curId].tasks[tid]=task;
+  await fbSave(curId);
+  window.closeTaskModal(); renderContent();
+};
+window.deleteTask = async()=>{
+  if(!editTaskId||!curId||!confirm('確定刪除此任務？')) return;
+  delete projects[curId].tasks[editTaskId];
+  await fbSave(curId); window.closeTaskModal(); renderContent();
+};
 
-// ── CLOSE ON OVERLAY ──────────────────────────────────────────────────
-['projModal','vendorModal','taskModal'].forEach(id => {
-  document.getElementById(id).addEventListener('click', e => {
-    if (e.target.id === id) e.target.classList.remove('open');
-  });
+// ── MODAL 關閉 ────────────────────────────────────────────────────────
+['projModal','vendorModal','taskModal'].forEach(id=>{
+  $(id).addEventListener('click',e=>{if(e.target.id===id) e.target.classList.remove('open');});
 });
 
-// ── INIT ──────────────────────────────────────────────────────────────
-await loadProjects();
-// 自動選第一個專案
-const ids = Object.keys(projects);
-if (ids.length > 0) selectProject(ids[0]);
-
+// ── START ─────────────────────────────────────────────────────────────
+init();
 </script>
 </body>
 </html>
