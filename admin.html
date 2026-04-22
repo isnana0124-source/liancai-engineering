@@ -436,7 +436,7 @@ function renderContent(){
 // ── VENDORS ───────────────────────────────────────────────────────────
 function renderVendors(){
   const p=projects[curId], vendors=p.vendors||[];
-  const base=location.href.replace('admin.html','');
+  const base='https://isnana0124-source.github.io/liancai-engineering/';
   $('vendorLinks').innerHTML = vendors.length
     ? vendors.map((v,i)=>{
         const url=`${base}vendor.html?project=${encodeURIComponent(curId)}&vendor=${encodeURIComponent(v)}`;
