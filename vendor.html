@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工程進度查詢</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f6f9;--bg2:#fff;--bg3:#f0f2f5;--bg4:#e4e8ef;
+  --border:#dde1e8;--shadow:0 1px 4px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.05);
+  --text:#1a1f2e;--text2:#5a6175;--text3:#9399a8;
+  --blue:#2563eb;--blue-lt:#eff4ff;--blue-md:#dbeafe;
+  --green:#16a34a;--green-md:#dcfce7;
+  --yellow:#d97706;--yellow-md:#fef3c7;
+  --red:#dc2626;--red-lt:#fff5f5;--red-md:#fee2e2;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Noto Sans TC',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;}
+
+#loading{position:fixed;inset:0;background:rgba(255,255,255,.95);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;}
+.spinner{width:40px;height:40px;border:3px solid var(--bg4);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+header{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 24px;height:62px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 10px rgba(0,0,0,.05);}
+.logo{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#2563eb,#60a5fa);display:flex;align-items:center;justify-content:center;font-size:20px;}
+.logo h1{font-size:16px;font-weight:700;}
+.logo p{font-size:11px;color:var(--text3);}
+.vendor-badge{background:var(--blue-lt);border:1px solid var(--blue-md);border-radius:20px;padding:4px 14px;font-size:13px;color:var(--blue);font-weight:700;}
+.readonly-badge{background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:4px 10px;font-size:11px;color:var(--text3);}
+
+.main{max-width:1100px;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:20px;}
+
+/* Stats */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow);}
+.stat-icon{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;}
+.stat-lbl{font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.06em;}
+.stat-val{font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;line-height:1.1;}
+.s-total .stat-icon{background:var(--blue-lt);}.s-total .stat-val{color:var(--blue);}
+.s-done  .stat-icon{background:var(--green-md);}.s-done  .stat-val{color:var(--green);}
+.s-doing .stat-icon{background:var(--yellow-md);}.s-doing .stat-val{color:var(--yellow);}
+.s-pend  .stat-icon{background:var(--red-md);}.s-pend  .stat-val{color:var(--red);}
+
+/* Progress */
+.prog-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:20px 24px;box-shadow:var(--shadow);}
+.prog-title{font-size:14px;font-weight:700;margin-bottom:14px;}
+.prog-big{font-size:48px;font-weight:900;font-family:'JetBrains Mono',monospace;color:var(--blue);margin-bottom:12px;}
+.prog-big em{font-size:20px;font-weight:400;color:var(--text3);font-style:normal;}
+.prog-bar-wrap{display:flex;flex-direction:column;gap:8px;}
+.prog-row{display:flex;align-items:center;gap:10px;}
+.prog-lbl{font-size:12px;color:var(--text2);width:120px;flex-shrink:0;font-weight:500;}
+.bar-track{flex:1;height:8px;background:var(--bg4);border-radius:4px;overflow:hidden;}
+.bar-fill{height:100%;border-radius:4px;transition:width .6s ease;}
+.prog-pct{font-size:11px;color:var(--text3);font-family:'JetBrains Mono',monospace;width:32px;text-align:right;}
+
+/* Timeline / Table */
+.section-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);}
+.section-hd{padding:16px 20px;border-bottom:1px solid var(--border);font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:space-between;}
+.deadline-chip{background:var(--red-lt);border:1px solid #fca5a5;border-radius:20px;padding:3px 12px;font-size:12px;color:var(--red);font-weight:700;}
+
+table{width:100%;border-collapse:collapse;}
+thead th{background:var(--bg3);padding:10px 14px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border);}
+tbody tr{border-bottom:1px solid var(--bg3);transition:background .1s;}
+tbody tr:last-child{border-bottom:none;}
+tbody tr:hover{background:var(--bg3);}
+tbody td{padding:11px 14px;font-size:13px;vertical-align:middle;}
+.td-m{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2);}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+.bd{width:5px;height:5px;border-radius:50%;background:currentColor;}
+.b-done{background:var(--green-md);color:var(--green);}
+.b-doing{background:var(--yellow-md);color:var(--yellow);}
+.b-pend{background:var(--red-md);color:var(--red);}
+.pbar{display:flex;align-items:center;gap:8px;min-width:100px;}
+.pbar-t{flex:1;height:6px;background:var(--bg4);border-radius:3px;overflow:hidden;}
+.pbar-f{height:100%;border-radius:3px;}
+.pbar-n{font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text3);width:28px;}
+.chip{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;}
+
+/* Last updated */
+.last-updated{text-align:center;font-size:12px;color:var(--text3);padding:12px;}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+@media(max-width:600px){.stats-row{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spinner"></div><p id="loadingMsg">載入中…</p></div>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🏗</div>
+    <div><h1 id="headerTitle">工程進度查詢</h1><p id="headerSub">即時工程進度</p></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <span class="vendor-badge" id="vendorBadge">廠商</span>
+    <span class="readonly-badge">👁 唯讀</span>
+  </div>
+</header>
+
+<div class="main">
+  <div id="errorMsg" style="display:none;background:var(--red-lt);border:1px solid #fca5a5;border-radius:12px;padding:16px 20px;color:var(--red);font-weight:600;text-align:center;"></div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card s-total"><div class="stat-icon">📋</div><div><div class="stat-lbl">我的任務</div><div class="stat-val" id="s-total">0</div></div></div>
+    <div class="stat-card s-done"> <div class="stat-icon">✅</div><div><div class="stat-lbl">已完成</div><div class="stat-val" id="s-done">0</div></div></div>
+    <div class="stat-card s-doing"><div class="stat-icon">⚙️</div><div><div class="stat-lbl">進行中</div><div class="stat-val" id="s-doing">0</div></div></div>
+    <div class="stat-card s-pend"> <div class="stat-icon">⏳</div><div><div class="stat-lbl">未開始</div><div class="stat-val" id="s-pend">0</div></div></div>
+  </div>
+
+  <!-- Progress -->
+  <div class="prog-card">
+    <div class="prog-title">📊 整體完成進度</div>
+    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+      <div class="prog-big" id="bigPct">0<em>%</em></div>
+      <div class="prog-bar-wrap" id="catBars" style="flex:1;min-width:200px;"></div>
+    </div>
+  </div>
+
+  <!-- Task Table -->
+  <div class="section-card">
+    <div class="section-hd">
+      <span>📋 任務明細</span>
+      <span class="deadline-chip" id="deadlineChip">⚑ 期限</span>
+    </div>
+    <table>
+      <thead><tr><th>類別</th><th>任務名稱</th><th>開始日期</th><th>完成日期</th><th>預估(日)</th><th>狀態</th><th>進度</th></tr></thead>
+      <tbody id="tblBody"></tbody>
+    </table>
+  </div>
+
+  <div class="last-updated"><span class="sync-dot"></span>即時同步中・資料由管理者更新</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAVI40syAU_DrKpHK8VinCTJjSNNQ577_Y",
+  authDomain: "lian-cai.firebaseapp.com",
+  projectId: "lian-cai",
+  storageBucket: "lian-cai.firebasestorage.app",
+  messagingSenderId: "85226153774",
+  appId: "1:85226153774:web:5db8f25cfee2536817bcbf"
+};
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
+
+const CAT_COLORS = {
+  '水電工程':'#2563eb','冷凍藏庫':'#0891b2','設備':'#7c3aed','隔間':'#e05656',
+  '室內空調':'#0284c7','工廠申請登記':'#16a34a','人員訓練 軟體建置':'#c026d3','其他':'#64748b',
+};
+function catColor(c){ return CAT_COLORS[c]||'#64748b'; }
+function pColor(p){ return p>=100?'var(--green)':p>=50?'var(--blue)':p>0?'var(--yellow)':'#e2e8f0'; }
+function bdg(s){
+  if(s==='已完成') return `<span class="badge b-done"><span class="bd"></span>${s}</span>`;
+  if(s==='進行中') return `<span class="badge b-doing"><span class="bd"></span>${s}</span>`;
+  return `<span class="badge b-pend"><span class="bd"></span>${s}</span>`;
+}
+
+// 取得 URL 參數
+const params  = new URLSearchParams(window.location.search);
+const projId  = params.get('project');
+const vendor  = params.get('vendor');
+
+if (!projId || !vendor) {
+  document.getElementById('loading').style.display='none';
+  document.getElementById('errorMsg').style.display='block';
+  document.getElementById('errorMsg').textContent='連結無效，請聯絡管理者取得正確連結。';
+} else {
+  document.getElementById('vendorBadge').textContent = '🏢 ' + vendor;
+
+  // 即時監聽
+  onSnapshot(doc(db,'projects',projId), snap => {
+    document.getElementById('loading').style.display='none';
+    if (!snap.exists()) {
+      document.getElementById('errorMsg').style.display='block';
+      document.getElementById('errorMsg').textContent='找不到此專案，請聯絡管理者。';
+      return;
+    }
+    const p = snap.data();
+    document.getElementById('headerTitle').textContent = p.name || '工程進度';
+    document.getElementById('headerSub').textContent   = p.desc || '即時工程進度';
+    document.getElementById('deadlineChip').textContent = p.deadline ? `⚑ 期限 ${p.deadline}` : '';
+
+    // 篩選屬於此廠商的任務
+    const allTasks = Object.values(p.tasks||{});
+    const myTasks  = allTasks.filter(t =>
+      (t.worker||'').includes(vendor) || (t.cat||'').includes(vendor)
+    );
+
+    // 若沒有符合的，顯示全部任務（讓廠商看到整體進度）
+    const tasks = myTasks.length ? myTasks : allTasks;
+    const isAll = myTasks.length === 0;
+
+    document.getElementById('s-total').textContent = tasks.length;
+    document.getElementById('s-done').textContent  = tasks.filter(t=>t.status==='已完成').length;
+    document.getElementById('s-doing').textContent = tasks.filter(t=>t.status==='進行中').length;
+    document.getElementById('s-pend').textContent  = tasks.filter(t=>t.status==='未開始').length;
+
+    // Big percent
+    const tot = tasks.length ? Math.round(tasks.reduce((s,t)=>s+t.pct,0)/tasks.length) : 0;
+    document.getElementById('bigPct').innerHTML = `${tot}<em>%</em>`;
+
+    // Category bars
+    const cats={};
+    tasks.forEach(t=>{ if(!cats[t.cat]) cats[t.cat]={s:0,n:0}; cats[t.cat].s+=t.pct; cats[t.cat].n++; });
+    document.getElementById('catBars').innerHTML = Object.entries(cats).map(([cat,v])=>{
+      const pp=Math.round(v.s/v.n), c=catColor(cat);
+      return `<div class="prog-row"><div class="prog-lbl">${cat}</div><div class="bar-track"><div class="bar-fill" style="width:${pp}%;background:${c}"></div></div><div class="prog-pct">${pp}%</div></div>`;
+    }).join('');
+
+    // Table
+    const sorted = [...tasks].sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+    document.getElementById('tblBody').innerHTML = sorted.map(t=>`
+      <tr>
+        <td><span class="chip" style="background:${catColor(t.cat)}18;color:${catColor(t.cat)};border:1px solid ${catColor(t.cat)}33">${t.cat||'—'}</span></td>
+        <td style="font-weight:600">${t.name}</td>
+        <td class="td-m">${t.start||'—'}</td>
+        <td class="td-m">${t.end||'—'}</td>
+        <td class="td-m">${t.est||'—'}</td>
+        <td>${bdg(t.status)}</td>
+        <td><div class="pbar"><div class="pbar-t"><div class="pbar-f" style="width:${t.pct}%;background:${pColor(t.pct)}"></div></div><div class="pbar-n">${t.pct}%</div></div></td>
+      </tr>`).join('');
+  }, err => {
+    document.getElementById('loading').style.display='none';
+    document.getElementById('errorMsg').style.display='block';
+    document.getElementById('errorMsg').textContent='無法載入資料，請稍後再試。';
+  });
+}
+</script>
+</body>
+</html>
