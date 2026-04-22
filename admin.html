@@ -544,9 +544,13 @@ function inlineEdit(tid,field,el,type){
     task[field]=v;
     if(field==='status'&&v==='已完成') task.pct=100;
     if(field==='pct'&&v===100) task.status='已完成';
-    await updateDoc(doc(db,'projects',currentProjId),{[`tasks.${tid}.${field}`]:v});
-    if(field==='status'&&v==='已完成') await updateDoc(doc(db,'projects',currentProjId),{[`tasks.${tid}.pct`]:100});
-    showToast('已儲存');
+    const proj=projects[currentProjId]; if(!proj) return;
+    if(!proj.tasks[tid]) return;
+    proj.tasks[tid][field]=v;
+    if(field==='status'&&v==='已完成') proj.tasks[tid].pct=100;
+    if(field==='pct'&&v===100) proj.tasks[tid].status='已完成';
+    await setDoc(doc(db,'projects',currentProjId),{tasks: proj.tasks},{merge:true});
+    showToast('✅ 已儲存');
   }
   inp.addEventListener('blur',commit);
   inp.addEventListener('keydown',e=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape')el.innerHTML=display;});
@@ -731,9 +735,9 @@ async function saveTask(){
     pct:Math.min(100,Math.max(0,parseInt(document.getElementById('tm-pct').value)||0)),
   };
   if(task.status==='已完成') task.pct=100;
-  await updateDoc(doc(db,'projects',currentProjId),{[`tasks.${tid}`]:task});
   if(!projects[currentProjId].tasks) projects[currentProjId].tasks={};
   projects[currentProjId].tasks[tid]=task;
+  await setDoc(doc(db,'projects',currentProjId),{tasks: projects[currentProjId].tasks},{merge:true});
   closeTaskModal();
   showToast(editingTaskId?'任務已更新':'任務已新增');
 }
@@ -742,7 +746,7 @@ async function deleteTask(){
   if(!confirm('確定要刪除此任務？')) return;
   const p=projects[currentProjId];
   delete p.tasks[editingTaskId];
-  await updateDoc(doc(db,'projects',currentProjId),{[`tasks.${editingTaskId}`]:null});
+  await setDoc(doc(db,'projects',currentProjId),{tasks: p.tasks},{merge:true});
   closeTaskModal();
   showToast('任務已刪除');
 }
