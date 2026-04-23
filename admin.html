@@ -179,6 +179,7 @@ tbody td{padding:10px 14px;font-size:13px;vertical-align:middle;}
   <div class="hd-right">
     <span id="syncStatus"><span class="sync-dot sync-off"></span>連線中</span>
     <span class="admin-badge">👑 管理者</span>
+    <button class="btn btn-ghost btn-sm" onclick="openClientPage()" id="clientPageBtn" style="display:none">👁 客戶頁面 ↗</button>
     <button class="btn btn-blue btn-sm" onclick="openTaskModal()">＋ 新增任務</button>
   </div>
 </header>
@@ -212,6 +213,8 @@ tbody td{padding:10px 14px;font-size:13px;vertical-align:middle;}
           <span class="deadline-chip" id="projDeadline">⚑ 期限</span>
           <button class="btn btn-ghost btn-sm" onclick="openVendorModal()">👥 管理廠商</button>
           <button class="btn btn-ghost btn-sm" onclick="openProjEditModal()">✏️ 編輯專案</button>
+          <button class="btn btn-ghost btn-sm" onclick="openClientPageInNew()" style="color:var(--blue);border-color:var(--blue-md);background:var(--blue-lt)">👁 客戶頁面 ↗</button>
+          <button class="btn btn-blue btn-sm" onclick="downloadReport()">⬇ 下載進度報告</button>
           <button class="btn btn-red btn-sm" onclick="deleteProject()">🗑 刪除專案</button>
         </div>
       </div>
@@ -420,6 +423,8 @@ function renderContent(){
   const p = projects[curId]; if(!p) return;
   $('emptyState').style.display='none';
   $('projContent').style.display='flex';
+  const cpBtn = $('clientPageBtn');
+  if(cpBtn) cpBtn.style.display='inline-flex';
   $('projTitle').textContent    = p.name;
   $('projDesc').textContent     = p.desc||'';
   $('projDeadline').textContent = p.deadline?`⚑ 期限 ${p.deadline}`:'';
@@ -652,6 +657,197 @@ window.deleteTask = async()=>{
 ['projModal','vendorModal','taskModal'].forEach(id=>{
   $(id).addEventListener('click',e=>{if(e.target.id===id) e.target.classList.remove('open');});
 });
+
+// ── 客戶頁面 & 下載報告 ───────────────────────────────────────────────
+const BASE='https://isnana0124-source.github.io/liancai-engineering/';
+window.openClientPage = ()=>{
+  if(!curId) return;
+  window.open(`${BASE}client.html?project=${encodeURIComponent(curId)}`, '_blank');
+};
+window.openClientPageInNew = window.openClientPage;
+
+window.downloadReport = ()=>{
+  if(!curId) return;
+  const p = projects[curId];
+  if(!p){ toast('請先選擇專案'); return; }
+  const tasks = Object.values(p.tasks||{}).filter(t=>t&&typeof t==='object');
+  const total  = tasks.length;
+  const done   = tasks.filter(t=>t.status==='已完成').length;
+  const doing  = tasks.filter(t=>t.status==='進行中').length;
+  const pend   = tasks.filter(t=>t.status==='未開始').length;
+  const avgPct = total ? Math.round(tasks.reduce((s,t)=>s+(t.pct||0),0)/total) : 0;
+
+  // 依類別分組
+  const catMap = {};
+  tasks.forEach(t=>{ if(!catMap[t.cat||'其他']) catMap[t.cat||'其他']=[]; catMap[t.cat||'其他'].push(t); });
+
+  const catRows = Object.entries(catMap).map(([cat,ts])=>{
+    const cp = Math.round(ts.reduce((s,t)=>s+(t.pct||0),0)/ts.length);
+    const col = CAT_COLORS[cat]||'#64748b';
+    return `<tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0">
+        <span style="display:inline-block;background:${col}18;color:${col};border:1px solid ${col}33;border-radius:10px;padding:2px 10px;font-size:12px;font-weight:600">${cat}</span>
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;font-size:13px">${ts.length}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;min-width:100px">
+            <div style="width:${cp}%;height:100%;background:${cp>=100?'#16a34a':cp>=50?'#2563eb':'#d97706'};border-radius:4px"></div>
+          </div>
+          <span style="font-size:12px;color:#64748b;font-weight:600;min-width:32px">${cp}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const taskRows = tasks.sort((a,b)=>(a.start||'9999').localeCompare(b.start||'9999')).map(t=>{
+    const stColor = t.status==='已完成'?'#16a34a':t.status==='進行中'?'#d97706':'#dc2626';
+    const stBg    = t.status==='已完成'?'#dcfce7':t.status==='進行中'?'#fef3c7':'#fee2e2';
+    const col = CAT_COLORS[t.cat||'其他']||'#64748b';
+    return `<tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12px">
+        <span style="background:${col}18;color:${col};border:1px solid ${col}33;border-radius:8px;padding:2px 8px;font-weight:600">${t.cat||'—'}</span>
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:13px">${t.name}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b">${t.worker||'—'}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b;font-family:monospace">${t.start||'—'}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b;font-family:monospace">${t.end||'—'}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12px;text-align:center">
+        <span style="background:${stBg};color:${stColor};border-radius:12px;padding:3px 10px;font-size:11px;font-weight:700">${t.status}</span>
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;min-width:60px">
+            <div style="width:${t.pct||0}%;height:100%;background:${(t.pct||0)>=100?'#16a34a':(t.pct||0)>=50?'#2563eb':'#d97706'};border-radius:3px"></div>
+          </div>
+          <span style="font-size:11px;color:#64748b;font-weight:600">${t.pct||0}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const today = new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'});
+  const html = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>工程進度報告 - ${p.name}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700;900&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'Noto Sans TC',sans-serif;background:#f8fafc;color:#1a1f2e;padding:40px;}
+  @media print{body{padding:20px;background:#fff;} .no-print{display:none!important;}}
+</style>
+</head>
+<body>
+  <!-- 列印提示 -->
+  <div class="no-print" style="background:#2563eb;color:#fff;padding:12px 20px;border-radius:10px;margin-bottom:24px;display:flex;align-items:center;justify-content:between;gap:12px">
+    <span style="flex:1">💡 請按 <strong>Ctrl+P</strong>（Windows）或 <strong>Cmd+P</strong>（Mac），選擇「另存為 PDF」即可儲存正式報告</span>
+    <button onclick="window.print()" style="background:#fff;color:#2563eb;border:none;border-radius:8px;padding:8px 18px;font-weight:700;cursor:pointer;font-family:inherit">🖨 列印 / 儲存 PDF</button>
+  </div>
+
+  <!-- 報告標題 -->
+  <div style="background:#fff;border-radius:16px;padding:32px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
+      <div style="width:56px;height:56px;background:linear-gradient(135deg,#2563eb,#60a5fa);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:28px">🏗</div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">工程進度報告</div>
+        <h1 style="font-size:24px;font-weight:900">${p.name}</h1>
+        ${p.desc?`<p style="font-size:14px;color:#64748b;margin-top:4px">${p.desc}</p>`:''}
+      </div>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:#64748b;border-top:1px solid #f1f5f9;padding-top:16px">
+      <span>📅 報告產生：${today}</span>
+      ${p.start?`<span>🚀 開始日期：${p.start}</span>`:''}
+      ${p.deadline?`<span>⚑ 完工期限：${p.deadline}</span>`:''}
+    </div>
+  </div>
+
+  <!-- 統計摘要 -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px">
+    <div style="background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      <div style="font-size:28px;font-weight:900;color:#2563eb">${total}</div>
+      <div style="font-size:11px;color:#94a3b8;font-weight:700;margin-top:4px">總任務數</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      <div style="font-size:28px;font-weight:900;color:#16a34a">${done}</div>
+      <div style="font-size:11px;color:#94a3b8;font-weight:700;margin-top:4px">已完成</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      <div style="font-size:28px;font-weight:900;color:#d97706">${doing}</div>
+      <div style="font-size:11px;color:#94a3b8;font-weight:700;margin-top:4px">進行中</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      <div style="font-size:28px;font-weight:900;color:#dc2626">${pend}</div>
+      <div style="font-size:11px;color:#94a3b8;font-weight:700;margin-top:4px">未開始</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+      <div style="font-size:28px;font-weight:900;color:#7c3aed">${avgPct}%</div>
+      <div style="font-size:11px;color:#94a3b8;font-weight:700;margin-top:4px">整體進度</div>
+    </div>
+  </div>
+
+  <!-- 整體進度條 -->
+  <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span style="font-size:14px;font-weight:700">整體工程進度</span>
+      <span style="font-size:18px;font-weight:900;color:${avgPct>=100?'#16a34a':avgPct>=50?'#2563eb':'#d97706'}">${avgPct}%</span>
+    </div>
+    <div style="height:14px;background:#e2e8f0;border-radius:7px;overflow:hidden">
+      <div style="width:${avgPct}%;height:100%;background:${avgPct>=100?'#16a34a':avgPct>=50?'#2563eb':'#d97706'};border-radius:7px;transition:width .5s"></div>
+    </div>
+  </div>
+
+  <!-- 各類別進度 -->
+  <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:14px">📊 各類別進度</h2>
+    <table style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="background:#f8fafc">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">類別</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">任務數</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;text-transform:uppercase;border-bottom:2px solid #e2e8f0">平均進度</th>
+        </tr>
+      </thead>
+      <tbody>${catRows}</tbody>
+    </table>
+  </div>
+
+  <!-- 完整任務明細 -->
+  <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+    <h2 style="font-size:15px;font-weight:700;margin-bottom:14px">📋 完整任務明細</h2>
+    <table style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="background:#f8fafc">
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;border-bottom:2px solid #e2e8f0">類別</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;border-bottom:2px solid #e2e8f0">任務名稱</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;border-bottom:2px solid #e2e8f0">協作人員</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;border-bottom:2px solid #e2e8f0">開始日期</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;border-bottom:2px solid #e2e8f0">完成日期</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;border-bottom:2px solid #e2e8f0">狀態</th>
+          <th style="padding:8px 12px;text-align:left;font-size:11px;color:#94a3b8;font-weight:700;border-bottom:2px solid #e2e8f0">進度</th>
+        </tr>
+      </thead>
+      <tbody>${taskRows}</tbody>
+    </table>
+  </div>
+
+  <div style="text-align:center;margin-top:32px;color:#94a3b8;font-size:12px">
+    聯采工程管理系統 v1.0 ｜ 報告產生時間：${today}
+  </div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `工程進度報告_${p.name}_${dateStr}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('✅ 報告已下載，用瀏覽器開啟後按 Ctrl+P 即可存成 PDF');
+};
 
 // ── START ─────────────────────────────────────────────────────────────
 init();
